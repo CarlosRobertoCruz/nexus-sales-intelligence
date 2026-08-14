@@ -1,0 +1,16 @@
+function PauseIcon(props: React.SVGProps<SVGSVGElement> & { size?: string | number }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      width="100%"
+      height="100%"
+      {...props}
+    >
+      <rect x="7" y="5" width="4" height="14" rx="1" />
+      <rect x="13" y="5" width="4" height="14" rx="1" />
+    </svg>
+  );
+}
+
+export default PauseIcon;

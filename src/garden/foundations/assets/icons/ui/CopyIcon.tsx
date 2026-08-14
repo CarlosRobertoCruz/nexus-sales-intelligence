@@ -1,0 +1,20 @@
+function CopyIcon(props: React.SVGProps<SVGSVGElement> & { size?: string | number }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      width="100%"
+      height="100%"
+      {...props}
+    >
+      <rect x="8" y="8" width="14" height="14" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </svg>
+  );
+}
+
+export default CopyIcon;

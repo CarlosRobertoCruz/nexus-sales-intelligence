@@ -1,0 +1,79 @@
+/* Shell responsivo da aplicação. Cores e medidas visuais vêm dos tokens do Garden nos componentes. */
+* { box-sizing: border-box; }
+html { min-width: 320px; background: #0D0B18; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+button, input, select, textarea { font: inherit; }
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(228px, 264px) minmax(0, 1fr); }
+.app-sidebar { position: sticky; top: 0; height: 100vh; padding: 24px 18px; }
+.app-main { width: 100%; max-width: 1600px; margin: 0 auto; padding: 32px; }
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.insight-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); gap: 16px; }
+.legend-dot { width: 8px; height: 8px; border-radius: 999px; }
+.plan-table { display: grid; }
+.plan-table-head, .plan-table-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(110px, .5fr)); gap: 16px; align-items: center; padding: 12px 14px; }
+.plan-table-head { border-bottom: 1px solid #2B2640; }
+.plan-table-row { border-bottom: 1px solid #221E33; }
+.plan-table-row:last-child { border-bottom: 0; }
+.sales-analysis-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .75fr); gap: 16px; }
+.plan-comparison-row { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(260px, 1.2fr); gap: 18px; align-items: center; }
+.comparison-track { flex: 1; height: 7px; border-radius: 999px; overflow: hidden; background: #221E33; }
+.comparison-track > div { height: 100%; border-radius: inherit; min-width: 3px; }
+.rank-number { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: #171426; }
+.sales-table { display: grid; overflow-x: auto; }
+.sales-table-head, .sales-table-row { display: grid; grid-template-columns: 100px minmax(150px, 1fr) minmax(210px, 1.35fr) 110px 110px 100px; gap: 16px; align-items: center; min-width: 900px; padding: 12px 14px; }
+.sales-table-head { border-bottom: 1px solid #2B2640; }
+.sales-table-row { border-bottom: 1px solid #221E33; }
+.sales-table-row:last-child { border-bottom: 0; }
+.renewals-insight-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 16px; }
+.benefits-content { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: center; }
+.benefit-dot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
+.renewal-plan-track { width: 100%; height: 8px; border-radius: 999px; overflow: hidden; background: #221E33; }
+.renewal-plan-track > div { min-width: 3px; height: 100%; border-radius: inherit; }
+.renewals-table { display: grid; overflow-x: auto; }
+.renewals-table-head, .renewals-table-row { display: grid; grid-template-columns: 100px minmax(150px, 1fr) minmax(210px, 1.3fr) minmax(160px, .9fr) 100px 100px; gap: 16px; align-items: center; min-width: 920px; padding: 12px 14px; }
+.renewals-table-head { border-bottom: 1px solid #2B2640; }
+.renewals-table-row { border-bottom: 1px solid #221E33; }
+.renewals-table-row:last-child { border-bottom: 0; }
+.cancellations-insight-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); gap: 16px; }
+.cancellation-reasons-content { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 24px; align-items: center; }
+.reason-dot { width: 10px; height: 10px; border-radius: 999px; flex: 0 0 auto; }
+.cancellation-location-track { width: 100%; height: 7px; border-radius: 999px; overflow: hidden; background: #221E33; }
+.cancellation-location-track > div { min-width: 3px; height: 100%; border-radius: inherit; }
+.cancellations-table { display: grid; overflow-x: auto; }
+.cancellations-table-head, .cancellations-table-row { display: grid; grid-template-columns: 100px minmax(150px, 1fr) minmax(210px, 1.25fr) minmax(190px, 1.1fr) 110px 100px; gap: 16px; align-items: center; min-width: 960px; padding: 12px 14px; }
+.cancellations-table-head { border-bottom: 1px solid #2B2640; }
+.cancellations-table-row { border-bottom: 1px solid #221E33; }
+.cancellations-table-row:last-child { border-bottom: 0; }
+.location-map-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(300px, .72fr); gap: 16px; align-items: stretch; }
+.commercial-map { width: 100%; height: 560px; overflow: hidden; border-radius: 14px; border: 1px solid #2B2640; background: #171426; }
+.commercial-map-marker { display: grid; place-items: center; padding: 0; border: 3px solid; border-radius: 999px; color: #fff; cursor: pointer; font: 800 13px/1 sans-serif; transition: transform 160ms ease, filter 160ms ease; }
+.commercial-map-marker:hover, .commercial-map-marker:focus-visible { transform: scale(1.1); filter: brightness(1.12); outline: 3px solid rgba(255,255,255,.35); outline-offset: 2px; }
+.commercial-map-popup { display: grid; gap: 5px; min-width: 210px; color: #171426; font-family: sans-serif; }
+.commercial-map-popup strong { font-size: 14px; }
+.commercial-map-popup span { font-size: 12px; line-height: 1.45; }
+.commercial-map-popup small { color: #6b647f; font-size: 10px; }
+.location-rank { width: 32px; height: 32px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; background: #171426; }
+.team-insight-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 16px; }
+.team-performance-row { display: grid; grid-template-columns: minmax(190px, .75fr) minmax(260px, 1.25fr); gap: 20px; align-items: center; padding: 14px; border-radius: 12px; background: #171426; }
+.team-avatar { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; background: #241B4B; border: 1px solid #43348A; }
+.team-production-track { height: 8px; overflow: hidden; border-radius: 999px; background: #221E33; }
+.team-production-track > div { height: 100%; min-width: 3px; border-radius: inherit; }
+.team-table { display: grid; overflow-x: auto; }
+.team-table-head, .team-table-row { display: grid; grid-template-columns: minmax(170px, 1.2fr) repeat(5, minmax(105px, .65fr)); gap: 16px; align-items: center; min-width: 820px; padding: 12px 14px; }
+.team-table-head { border-bottom: 1px solid #2B2640; }
+.team-table-row { border-bottom: 1px solid #221E33; }
+.team-table-row:last-child { border-bottom: 0; }
+@media (max-width: 1180px) { .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .insight-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .sales-analysis-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .renewals-insight-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .cancellations-insight-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .location-map-layout { grid-template-columns: 1fr; } }
+@media (max-width: 1180px) { .team-insight-grid { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .app-shell { grid-template-columns: 1fr; } .app-sidebar { position: static; height: auto; padding: 18px; } .app-sidebar nav { overflow-x: auto; } .app-sidebar nav > div { flex-direction: row !important; min-width: max-content; } .app-sidebar nav button > div { min-width: 150px; } .app-sidebar > div > div:last-child { display: none; } .app-main { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .plan-table { overflow-x: auto; } .plan-table-head, .plan-table-row { min-width: 650px; } }
+@media (max-width: 780px) { .plan-comparison-row { grid-template-columns: 1fr; } }
+@media (max-width: 780px) { .team-performance-row { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .benefits-content { grid-template-columns: 1fr; justify-items: center; } .benefits-content > div:last-child { width: 100%; } }
+@media (max-width: 620px) { .cancellation-reasons-content { grid-template-columns: 1fr; justify-items: center; } .cancellation-reasons-content > div:last-child { width: 100%; } }
+@media (max-width: 520px) { .kpi-grid { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .commercial-map { height: 440px; } }

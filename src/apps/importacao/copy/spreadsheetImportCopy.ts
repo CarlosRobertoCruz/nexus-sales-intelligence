@@ -1,0 +1,15 @@
+export const SPREADSHEET_IMPORT_COPY = {
+  button: "Importar planilhas",
+  title: "Importar período comercial",
+  subtitle: "Selecione o relatório de atendimentos do comercial e o relatório de ordens de serviço.",
+  attendanceLabel: "Atendimentos comerciais",
+  attendanceHint: "Relatório filtrado para a equipe comercial.",
+  serviceOrdersLabel: "Ordens de serviço",
+  serviceOrdersHint: "Relatório de OS do mesmo período.",
+  privacy: "O processamento acontece neste navegador. As planilhas não são enviadas para um servidor.",
+  cancel: "Cancelar",
+  confirm: "Processar período",
+  processing: "Processando planilhas…",
+  emptyStatus: "Nenhum período importado",
+  importedStatus: "Período carregado",
+} as const;
