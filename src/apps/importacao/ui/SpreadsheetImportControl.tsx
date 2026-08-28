@@ -1,4 +1,5 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
+import { APP_ICON_URL } from "@/core/assets/appAssets";
 import { Badge, Button, Icon, LoadingOverlay, Modal, Row, Stack, Surface, Text } from "@/garden/foundations";
 import { CheckCheckIcon, DatabaseIcon, FileXlsIcon, Trash2Icon, TriangleAlertIcon } from "@/garden/foundations/assets/icons/icons";
 import { DeleteConfirmModal } from "@/garden/patterns";
@@ -152,7 +153,7 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
         active={showImportLoading}
         logo={(
           <img
-            src="/nexus-sales-intelligence-app-icon-512.png"
+            src={APP_ICON_URL}
             alt=""
             aria-hidden="true"
             draggable={false}

@@ -84,6 +84,6 @@ O arquivo será criado na pasta `release`. Cada tag Git no formato `v*` também 
 
 ## Status
 
-Versão atual: **0.2.0-beta.2**.
+Versão atual: **0.2.0-beta.3**.
 
 Projeto em validação interna, distribuído como aplicativo desktop para Windows por meio de instaladores versionados no GitHub Releases.

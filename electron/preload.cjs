@@ -1,4 +1,7 @@
 "use strict";
 
-// A aplicação não precisa acessar APIs do Node no navegador.
-// Este arquivo permanece intencionalmente vazio para preservar o isolamento.
+const { contextBridge, ipcRenderer } = require("electron");
+
+contextBridge.exposeInMainWorld("nexusDesktop", {
+  fetchMapTile: (url) => ipcRenderer.invoke("map-tile:fetch", url),
+});

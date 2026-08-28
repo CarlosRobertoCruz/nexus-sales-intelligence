@@ -1,7 +1,7 @@
 {
   "name": "nexus-sales-intelligence",
   "private": true,
-  "version": "0.2.0-beta.2",
+  "version": "0.2.0-beta.3",
   "description": "Painel desktop de inteligência comercial da Nexus Fibra.",
   "author": "Nexus Fibra",
   "main": "electron/main.cjs",

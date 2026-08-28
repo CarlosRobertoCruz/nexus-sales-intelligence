@@ -1,5 +1,6 @@
 // Shell visual compartilhado; compõe navegação e conteúdo sem conhecer regras comerciais.
 import type { ReactNode } from "react";
+import { APP_ICON_URL } from "@/core/assets/appAssets";
 import { Badge, Icon, Pressable, Row, Stack, Text } from "@/garden/foundations";
 import { CheckCheckIcon, ChevronRightIcon, GaugeIcon, MapPinnedIcon, RefreshIcon, SalesChartIcon, UsersIcon } from "@/garden/foundations/assets/icons/icons";
 import { TOKENS } from "@/garden/tokens";
@@ -23,7 +24,7 @@ export function AppShell({ activePage, onNavigate, importControl, children }: Ap
         <Stack gap={TOKENS.spacing[32]} style={{ minHeight: "100%" }}>
           <Row align="center" gap={TOKENS.spacing[12]}>
             <img
-              src="/nexus-sales-intelligence-app-icon-512.png"
+              src={APP_ICON_URL}
               alt="Nexus Sales Intelligence"
               width={48}
               height={48}

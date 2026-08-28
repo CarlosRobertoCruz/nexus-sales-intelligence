@@ -375,10 +375,16 @@ function mapCanvasPoint(location: MappedCommercialLocation, viewport: MapViewpor
 }
 
 async function fetchMapTile(zoom: number, tileX: number, tileY: number): Promise<ImageBitmap> {
+  const tileUrl = `https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`;
+  if (window.nexusDesktop) {
+    const tile = await window.nexusDesktop.fetchMapTile(tileUrl);
+    return await createImageBitmap(new Blob([tile.data], { type: tile.contentType }));
+  }
+
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`https://tile.openstreetmap.org/${zoom}/${tileX}/${tileY}.png`, {
+    const response = await fetch(tileUrl, {
       credentials: "omit",
       signal: controller.signal,
     });
