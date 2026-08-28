@@ -43,6 +43,12 @@ npm install
 npm run dev
 ```
 
+Para executar a versão desktop durante o desenvolvimento:
+
+```bash
+npm run desktop:dev
+```
+
 Validação de produção:
 
 ```bash
@@ -50,17 +56,34 @@ npm run build
 npm run lint
 ```
 
+## Instalação no Windows
+
+O aplicativo pode ser instalado sem Visual Studio e sem Node.js. Acesse a página de [Releases do projeto](https://github.com/CarlosRobertoCruz/nexus-sales-intelligence/releases), baixe o arquivo `Nexus-Sales-Intelligence-Setup-<versão>.exe` e execute o instalador.
+
+Como esta versão ainda não possui assinatura digital, o Windows SmartScreen pode exibir um aviso. Nesse caso, confirme que o arquivo foi baixado deste repositório antes de selecionar **Mais informações** e **Executar assim mesmo**.
+
+Para gerar o instalador localmente em uma máquina de desenvolvimento:
+
+```bash
+npm install
+npm run build:windows
+```
+
+O arquivo será criado na pasta `release`. Cada tag Git no formato `v*` também aciona automaticamente a geração e publicação do instalador no GitHub Releases.
+
 ## Tecnologias
 
 - React
 - TypeScript
 - Vite
+- Electron
+- electron-builder
 - IndexedDB
 - ECharts
 - MapLibre GL
 
 ## Status
 
-Versão atual: **0.2.0-beta.1**.
+Versão atual: **0.2.0-beta.2**.
 
-Projeto em validação interna. A próxima etapa será o empacotamento como aplicativo desktop para Windows e a publicação de instaladores versionados pelo GitHub Releases.
+Projeto em validação interna, distribuído como aplicativo desktop para Windows por meio de instaladores versionados no GitHub Releases.

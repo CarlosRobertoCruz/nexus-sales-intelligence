@@ -1,0 +1,52 @@
+name: Publicar instalador do Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Preparar o Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Validar o código
+        run: npm run lint
+
+      - name: Gerar o instalador
+        run: npm run build:windows
+
+      - name: Publicar no GitHub Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $installer = Get-ChildItem -LiteralPath release -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "O instalador não foi encontrado." }
+
+          $arguments = @(
+            "release", "create", "${{ github.ref_name }}", $installer.FullName,
+            "--generate-notes",
+            "--title", "Nexus Sales Intelligence ${{ github.ref_name }}"
+          )
+
+          if ("${{ contains(github.ref_name, '-') }}" -eq "true") {
+            $arguments += "--prerelease"
+          }
+
+          gh @arguments
