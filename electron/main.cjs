@@ -71,7 +71,6 @@ ipcMain.handle("map-tile:fetch", async (_event, requestedUrl) => {
       cache: "force-cache",
       headers: {
         "User-Agent": `NexusSalesIntelligence/${app.getVersion()} (+https://github.com/CarlosRobertoCruz/nexus-sales-intelligence)`,
-        Referer: "https://github.com/CarlosRobertoCruz/nexus-sales-intelligence",
       },
       signal: controller.signal,
     });
