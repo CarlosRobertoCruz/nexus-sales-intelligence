@@ -4,11 +4,18 @@ import { buildLocationMetrics } from "@/apps/localidades/domain/buildLocationMet
 import { classifyCommercialRows } from "../domain/classifyCommercialRows";
 import { commercialMonthKey, EMPTY_COMMERCIAL_LEDGER, listCommercialLedgerPeriods, mergeCommercialLedger, selectCommercialLedgerMonth } from "../domain/commercialDataLedger";
 import { clearCommercialData, loadCommercialData, saveCommercialDashboard, saveCommercialData } from "../services/commercialDashboardRepository";
-import { readImportedWorksheet } from "../services/excelImportService";
-import type { ClassifiedCommercialImport, CommercialDataLedger, ImportStepStatus, SpreadsheetImportFiles } from "../types/spreadsheetImport";
+import { readAndCombineImportedWorksheets } from "../services/excelImportService";
+import type { ClassifiedCommercialImport, CommercialDataLedger, ImportStepStatus, SpreadsheetImportFiles, SpreadsheetReadProgress } from "../types/spreadsheetImport";
 import { buildCommercialDashboard } from "../viewModel/buildCommercialDashboard";
 
-const EMPTY_FILES: SpreadsheetImportFiles = { attendance: null, serviceOrders: null };
+const EMPTY_FILES: SpreadsheetImportFiles = {
+  attendance: [],
+  serviceOrders: [],
+};
+
+function yieldToInterface(): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
@@ -31,6 +38,7 @@ export function useSpreadsheetImportController() {
   const [files, setFiles] = useState<SpreadsheetImportFiles>(EMPTY_FILES);
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<ImportStepStatus>("idle");
+  const [readProgress, setReadProgress] = useState<SpreadsheetReadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
 
@@ -61,8 +69,10 @@ export function useSpreadsheetImportController() {
     return () => { active = false; };
   }, []);
 
-  const isProcessing = isHydrating || status === "reading" || status === "processing";
-  const canImport = Boolean(files.attendance && files.serviceOrders) && !isProcessing;
+  const isProcessing = isHydrating || status === "reading" || status === "processing" || status === "saving";
+  const canImport = files.attendance.length > 0
+    && files.serviceOrders.length > 0
+    && !isProcessing;
   const availablePeriods = listCommercialLedgerPeriods(ledger);
   const dashboardPeriod = dashboard?.meta.periodKey.slice(0, 7) ?? "";
   const selectedPeriodValue = selectedPeriod
@@ -73,6 +83,7 @@ export function useSpreadsheetImportController() {
     if (isHydrating) return;
     setFiles(EMPTY_FILES);
     setStatus("idle");
+    setReadProgress(null);
     setError(null);
     setSummary(null);
     setIsOpen(true);
@@ -82,14 +93,14 @@ export function useSpreadsheetImportController() {
     if (!isProcessing) setIsOpen(false);
   }
 
-  function selectAttendance(file: File | null): void {
-    setFiles((current) => ({ ...current, attendance: file }));
+  function selectAttendance(selectedFiles: ReadonlyArray<File>): void {
+    setFiles((current) => ({ ...current, attendance: selectedFiles }));
     setError(null);
     setStatus("idle");
   }
 
-  function selectServiceOrders(file: File | null): void {
-    setFiles((current) => ({ ...current, serviceOrders: file }));
+  function selectServiceOrders(selectedFiles: ReadonlyArray<File>): void {
+    setFiles((current) => ({ ...current, serviceOrders: selectedFiles }));
     setError(null);
     setStatus("idle");
   }
@@ -111,6 +122,7 @@ export function useSpreadsheetImportController() {
       setFiles(EMPTY_FILES);
       setIsOpen(false);
       setStatus("idle");
+      setReadProgress(null);
       setError(null);
       setSummary(null);
     } catch (caught) {
@@ -119,25 +131,36 @@ export function useSpreadsheetImportController() {
   }
 
   async function importSpreadsheets(): Promise<void> {
-    if (!files.attendance || !files.serviceOrders) return;
+    if (!files.attendance.length || !files.serviceOrders.length) return;
     try {
       setError(null);
       setSummary(null);
       setStatus("reading");
-      const [attendance, serviceOrders] = await Promise.all([
-        readImportedWorksheet(files.attendance),
-        readImportedWorksheet(files.serviceOrders),
-      ]);
+      const totalFiles = files.attendance.length
+        + files.serviceOrders.length;
+      let currentFile = 0;
+      const trackFile = (fileName: string) => {
+        currentFile += 1;
+        setReadProgress({ current: currentFile, total: totalFiles, fileName });
+      };
+      const attendance = await readAndCombineImportedWorksheets(files.attendance, "atendimentos", trackFile);
+      const serviceOrders = await readAndCombineImportedWorksheets(files.serviceOrders, "ordens de serviço", trackFile);
       setStatus("processing");
+      setReadProgress(null);
+      await yieldToInterface();
       const classified = classifyCommercialRows(attendance, serviceOrders);
       const { ledger: nextLedger, statistics } = mergeCommercialLedger(ledger, classified);
       const activePeriodKey = commercialMonthKey(classified.periodEnd);
       const nextDashboard = buildDashboardForPeriod(nextLedger, activePeriodKey, classified);
+      setStatus("saving");
+      await yieldToInterface();
       await saveCommercialData(nextLedger, nextDashboard);
       setLedger(nextLedger);
       setDashboard(nextDashboard);
       setSelectedPeriod(activePeriodKey);
       setSummary([
+        `${totalFiles.toLocaleString("pt-BR")} planilhas processadas`,
+        `${classified.sales.length.toLocaleString("pt-BR")} vendas válidas`,
         `${statistics.attendanceAdded.toLocaleString("pt-BR")} atendimentos adicionados`,
         `${statistics.attendanceUpdated.toLocaleString("pt-BR")} atualizados`,
         `${statistics.serviceOrdersAdded.toLocaleString("pt-BR")} OS adicionadas`,
@@ -146,6 +169,7 @@ export function useSpreadsheetImportController() {
       setStatus("success");
     } catch (caught) {
       setError(errorMessage(caught));
+      setReadProgress(null);
       setStatus("error");
     }
   }
@@ -157,6 +181,7 @@ export function useSpreadsheetImportController() {
     status,
     error,
     summary,
+    readProgress,
     isProcessing,
     isHydrating,
     canImport,

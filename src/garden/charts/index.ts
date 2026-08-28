@@ -4,6 +4,8 @@
  */
 export { AreaLineChart } from "./AreaLineChart";
 export { DualAreaLineChart } from "./DualAreaLineChart";
+export { GroupedColumnChart } from "./GroupedColumnChart";
+export type { GroupedColumnChartProps } from "./GroupedColumnChart";
 export { DonutChart } from "./DonutChart";
 export { MultiDonutChart } from "./MultiDonutChart";
 export type { MultiDonutChartTooltipProps } from "./MultiDonutChart";

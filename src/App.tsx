@@ -21,7 +21,7 @@ export default function App() {
   return (
     <AppShell activePage={activePage} onNavigate={setActivePage} importControl={<SpreadsheetImportControl controller={spreadsheetImport} />}>
       {activePage === "locations" && <LocalitiesPage controller={spreadsheetImport} periodSelector={periodSelector} />}
-      {activePage === "overview" && <SalesOverviewPage snapshot={dashboard?.overview} periodSelector={periodSelector} />}
+      {activePage === "overview" && <SalesOverviewPage snapshot={dashboard?.overview} dashboard={dashboard} locationMetrics={spreadsheetImport.locationMetrics} periodSelector={periodSelector} />}
       {activePage === "sales" && <SalesPage snapshot={dashboard?.sales} periodSelector={periodSelector} />}
       {activePage === "renewals" && <RenewalsPage snapshot={dashboard?.renewals} periodSelector={periodSelector} />}
       {activePage === "cancellations" && <CancellationsPage snapshot={dashboard?.cancellations} periodSelector={periodSelector} />}

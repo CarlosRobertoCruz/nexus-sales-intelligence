@@ -1,6 +1,8 @@
 # Nexus Sales Intelligence
 
-Aplicação de inteligência comercial da Nexus Fibra para análise de vendas, renovações, cancelamentos, localidades e desempenho da equipe a partir da importação de planilhas.
+Aplicação de inteligência comercial da Nexus Fibra que transforma relatórios do Hubsoft em painéis mensais de vendas, renovações, cancelamentos, reativações, localidades e desempenho da equipe comercial.
+
+O sistema cruza planilhas de atendimentos e ordens de serviço, consolida registros duplicados e apresenta os resultados em uma interface preparada para análise e impressão.
 
 ## Recursos atuais
 
@@ -9,10 +11,19 @@ Aplicação de inteligência comercial da Nexus Fibra para análise de vendas, r
 - Mapa de resultados por localidade.
 - Indicadores da equipe comercial.
 - Seleção do mês de referência.
-- Importação incremental de relatórios de atendimentos e ordens de serviço.
+- Importação simultânea de uma ou várias planilhas de atendimentos e ordens de serviço.
 - Atualização de registros duplicados durante novas importações.
 - Armazenamento local em IndexedDB.
 - Limpeza completa dos dados importados.
+- Geração de relatório PDF A4 com todas as abas e os três mapas territoriais.
+
+## Regras comerciais principais
+
+- Vendas são confirmadas por ordens de serviço de instalação finalizadas, com início e término executados válidos. O atendimento identifica a atendente e o período comercial.
+- Renovações são identificadas pelos atendimentos comerciais de renovação e alteração de plano concluídos.
+- Cancelamentos consideram somente cancelamentos efetivados; desistências e ocorrências sem conclusão permanecem fora do indicador.
+- Reativações são classificadas pelo tipo e conclusão da ordem de serviço.
+- Eventos repetidos do mesmo cliente são consolidados durante a importação.
 
 ## Privacidade dos dados
 
@@ -50,4 +61,6 @@ npm run lint
 
 ## Status
 
-Projeto em desenvolvimento. A próxima etapa será o empacotamento como aplicativo desktop para Windows e a publicação de instaladores versionados pelo GitHub Releases.
+Versão atual: **0.2.0-beta.1**.
+
+Projeto em validação interna. A próxima etapa será o empacotamento como aplicativo desktop para Windows e a publicação de instaladores versionados pelo GitHub Releases.

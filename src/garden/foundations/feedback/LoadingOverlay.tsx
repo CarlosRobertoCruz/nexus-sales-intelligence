@@ -10,7 +10,8 @@
 // Os 3 pontinhos embaixo da barra são só decoração ambiente (pulso em loop),
 // não representam etapas reais — evita alegar progresso que não existe.
 
-import type { ReactNode } from "react";
+import type { ReactElement, ReactNode, ReactPortal } from "react";
+import { createPortal } from "react-dom";
 import { TOKENS } from "@/garden/tokens";
 import { useTopLoadingProgress } from "@/garden/hooks/loading/useTopLoadingProgress";
 
@@ -50,6 +51,13 @@ const KEYFRAMES = `
 }
 `;
 
+function mountLoadingRoot(node: ReactElement): ReactElement | ReactPortal {
+  if (typeof document !== "undefined" && document.body) {
+    return createPortal(node, document.body);
+  }
+  return node;
+}
+
 export default function LoadingOverlay({
   active,
   logo,
@@ -77,14 +85,14 @@ export default function LoadingOverlay({
       ? `calc(${logoAnchorTop}vh - ${logoHeight / 2}px)`
       : undefined;
 
-  return (
+  return mountLoadingRoot(
     <div
       role="status"
       aria-live="polite"
       style={{
         position: "fixed",
         inset: 0,
-        zIndex: TOKENS.zIndex[9999],
+        zIndex: TOKENS.zIndex[10000],
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -245,6 +253,6 @@ export default function LoadingOverlay({
           {footer}
         </div>
       )}
-    </div>
+    </div>,
   );
 }

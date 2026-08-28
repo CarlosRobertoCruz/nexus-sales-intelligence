@@ -1,8 +1,10 @@
 // Tela da visão geral; apenas renderiza o view model e reage às interações locais.
 import { useState, type ReactNode } from "react";
+import type { CommercialDashboardBundle } from "@/core/types/commercialDashboard";
+import type { CommercialLocationMetric } from "@/apps/localidades/types/locations";
 import { DonutChart, PillColumnBarChart } from "@/garden/charts";
-import { Badge, Icon, KpiCard, LoadingScreen, Pressable, Row, Stack, Surface, Text } from "@/garden/foundations";
-import { ChartColumnBigIcon, CheckCheckIcon, ChevronRightIcon, GaugeIcon, RefreshIcon, SalesChartIcon, UsersIcon } from "@/garden/foundations/assets/icons/icons";
+import { Badge, Button, Icon, KpiCard, LoadingScreen, Pressable, Row, Stack, Surface, Text } from "@/garden/foundations";
+import { ChartColumnBigIcon, CheckCheckIcon, ChevronRightIcon, GaugeIcon, PrinterIcon, RefreshIcon, SalesChartIcon, UsersIcon } from "@/garden/foundations/assets/icons/icons";
 import { TOKENS } from "@/garden/tokens";
 import { SALES_OVERVIEW_COPY } from "../copy/salesOverviewCopy";
 import { useSalesOverviewController } from "../controller/useSalesOverviewController";
@@ -60,7 +62,7 @@ function Sidebar() {
   );
 }
 
-function DashboardContent({ vm, periodSelector }: { vm: SalesOverviewViewModel; periodSelector?: ReactNode }) {
+function DashboardContent({ vm, periodSelector, canPrintReport, isExportingPdf, exportError, onPrintReport }: { vm: SalesOverviewViewModel; periodSelector?: ReactNode; canPrintReport: boolean; isExportingPdf: boolean; exportError: string | null; onPrintReport: () => void }) {
   const points = vm.plans.map((plan) => ({ label: plan.label, value: plan.current }));
   return (
     <main className="app-main">
@@ -132,14 +134,27 @@ function DashboardContent({ vm, periodSelector }: { vm: SalesOverviewViewModel; 
           </Stack>
         </Surface>
 
+        <Surface tone="subtle" padding={TOKENS.spacing[20]} style={{ border: `1px solid ${TOKENS.color.stroke.default}` }}>
+          <Row align="center" justify="space-between" gap={TOKENS.spacing[20]} style={{ flexWrap: "wrap" }}>
+            <Stack gap={TOKENS.spacing[4]}>
+              <Text size="md" weight={800}>{SALES_OVERVIEW_COPY.printReport}</Text>
+              <Text size="sm" tone="muted">{SALES_OVERVIEW_COPY.printReportDescription}</Text>
+              {exportError && <Text size="xs" tone={null} role="alert" style={{ color: TOKENS.color.feedback.danger }}>{SALES_OVERVIEW_COPY.printReportError}</Text>}
+            </Stack>
+            <Button size="lg" radius="surface" disabled={!canPrintReport || isExportingPdf} onPress={onPrintReport} aria-label={SALES_OVERVIEW_COPY.printReport}>
+              <Row align="center" gap={TOKENS.spacing[8]}><Icon size="sm" color="currentColor"><PrinterIcon /></Icon>{isExportingPdf ? SALES_OVERVIEW_COPY.printingReport : SALES_OVERVIEW_COPY.printReport}</Row>
+            </Button>
+          </Row>
+        </Surface>
+
         <Text size="xs" tone="subtle" style={{ textAlign: "right" }}>Atualizado em {vm.updatedAt}</Text>
       </Stack>
     </main>
   );
 }
 
-export function SalesOverviewPage({ snapshot, periodSelector }: { snapshot?: SalesOverviewSnapshot; periodSelector?: ReactNode }) {
-  const { viewModel, isLoading } = useSalesOverviewController(snapshot);
+export function SalesOverviewPage({ snapshot, dashboard, locationMetrics = [], periodSelector }: { snapshot?: SalesOverviewSnapshot; dashboard?: CommercialDashboardBundle | null; locationMetrics?: ReadonlyArray<CommercialLocationMetric>; periodSelector?: ReactNode }) {
+  const { viewModel, isLoading, canPrintReport, isExportingPdf, exportError, printReport } = useSalesOverviewController(snapshot, dashboard, locationMetrics);
   if (isLoading || !viewModel) return <LoadingScreen visible onExitComplete={() => undefined} label="Carregando visão geral comercial" />;
-  return <DashboardContent vm={viewModel} periodSelector={periodSelector} />;
+  return <DashboardContent vm={viewModel} periodSelector={periodSelector} canPrintReport={canPrintReport} isExportingPdf={isExportingPdf} exportError={exportError} onPrintReport={() => void printReport()} />;
 }

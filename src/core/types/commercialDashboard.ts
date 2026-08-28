@@ -23,7 +23,7 @@ export type CommercialDataMeta = {
 
 export type SalesPlanId = "combo-plus" | "combo-total-plus" | "combo-view" | "combo-ultra" | "power-plus" | "ultra-power" | "other";
 export type SalesPlanMetric = { id: SalesPlanId; current: number; previous: number };
-export type SellerId = "beatriz" | "karini" | "giovanna" | "sara";
+export type SellerId = "beatriz" | "karini" | "giovanna" | "sara" | "unknown";
 export type MonthlySales = { month: string; currentYear: number; previousYear: number };
 export type PlanSales = { label: string; current: number; previous: number };
 export type SellerSales = { id: SellerId; name: string; current: number; previous: number };

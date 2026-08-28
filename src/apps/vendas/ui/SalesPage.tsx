@@ -1,6 +1,6 @@
 // Tela de vendas; renderiza indicadores e comparações sem decidir regras de negócio.
 import type { ReactNode } from "react";
-import { AreaLineChart } from "@/garden/charts";
+import { GroupedColumnChart } from "@/garden/charts";
 import { Badge, KpiCard, LoadingScreen, Row, Stack, Surface, Text } from "@/garden/foundations";
 import { ChartColumnBigIcon, SalesChartIcon, SparklesIcon, UsersIcon } from "@/garden/foundations/assets/icons/icons";
 import { TOKENS } from "@/garden/tokens";
@@ -102,7 +102,7 @@ function SalesContent({ vm, periodSelector }: { vm: SalesViewModel; periodSelect
     </section>
     <Surface tone="subtle" padding={TOKENS.spacing[24]} style={{ border: `1px solid ${TOKENS.color.stroke.default}` }}>
       <Stack gap={TOKENS.spacing[20]}><Row align="flex-start" justify="space-between" gap={TOKENS.spacing[16]}><Stack gap={TOKENS.spacing[4]}><Text size="xl" weight={800}>{SALES_COPY.trendTitle}</Text><Text size="sm" tone="muted">{SALES_COPY.trendDescription}</Text></Stack><Row gap={TOKENS.spacing[14]}><Row align="center" gap={TOKENS.spacing[6]}><span className="legend-dot" style={{ background: TOKENS.color.brand.primary }} /><Text size="xs" tone="muted">{vm.comparison.currentLabel}</Text></Row><Row align="center" gap={TOKENS.spacing[6]}><span className="legend-dot" style={{ background: TOKENS.color.content.subtle }} /><Text size="xs" tone="muted">{vm.comparison.previousLabel}</Text></Row></Row></Row>
-        <AreaLineChart labels={vm.trend.labels} series={vm.trend.current} seriesLabel={vm.comparison.currentLabel} frame={chartFrame} lineColor={TOKENS.color.brand.primary} tooltipPrimarySeriesInk={TOKENS.color.chart.seriesPrimary} extraSeries={[{ label: vm.comparison.previousLabel, values: [...vm.trend.previous], color: TOKENS.color.content.subtle, strokeDasharray: "6 6" }]} height={260} aria-label="Evolução mensal das vendas" />
+        <GroupedColumnChart labels={vm.trend.labels} primaryValues={vm.trend.current} secondaryValues={vm.trend.previous} primaryLabel={vm.comparison.currentLabel} secondaryLabel={vm.comparison.previousLabel} primaryColor={TOKENS.color.brand.primary} secondaryColor={TOKENS.color.content.subtle} frame={chartFrame} height={260} ariaLabel="Comparativo mensal das vendas" />
       </Stack>
     </Surface>
     <section className="sales-analysis-grid"><PlanComparison vm={vm} /><SellerRanking vm={vm} /></section>

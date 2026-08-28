@@ -1,5 +1,5 @@
 import { useState, type ChangeEvent, type ReactNode } from "react";
-import { Badge, Button, Icon, Modal, Row, Stack, Surface, Text } from "@/garden/foundations";
+import { Badge, Button, Icon, LoadingOverlay, Modal, Row, Stack, Surface, Text } from "@/garden/foundations";
 import { CheckCheckIcon, DatabaseIcon, FileXlsIcon, Trash2Icon, TriangleAlertIcon } from "@/garden/foundations/assets/icons/icons";
 import { DeleteConfirmModal } from "@/garden/patterns";
 import { TOKENS } from "@/garden/tokens";
@@ -10,9 +10,9 @@ type FilePickerProps = {
   id: string;
   label: string;
   hint: string;
-  file: File | null;
+  files: ReadonlyArray<File>;
   disabled: boolean;
-  onChange: (file: File | null) => void;
+  onChange: (files: ReadonlyArray<File>) => void;
 };
 
 function readableSize(bytes: number): string {
@@ -20,26 +20,33 @@ function readableSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
 }
 
-function FilePicker({ id, label, hint, file, disabled, onChange }: FilePickerProps) {
+function FilePicker({ id, label, hint, files, disabled, onChange }: FilePickerProps) {
   function handleChange(event: ChangeEvent<HTMLInputElement>): void {
-    onChange(event.target.files?.[0] ?? null);
+    onChange(Array.from(event.target.files ?? []));
   }
+
+  const hasFiles = files.length > 0;
+  const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+  const selectionSummary = files.length === 1
+    ? `${files[0].name} · ${readableSize(totalSize)}`
+    : `${files.length} arquivos · ${readableSize(totalSize)}`;
+  const selectedNames = files.map((file) => file.name).join("\n");
 
   return (
     <label htmlFor={id} style={{ display: "block", cursor: disabled ? "not-allowed" : "pointer" }}>
-      <Surface tone="subtle" padding={TOKENS.spacing[16]} style={{ border: `1px solid ${file ? TOKENS.color.brand.borderMuted : TOKENS.color.stroke.default}`, opacity: disabled ? 0.6 : 1 }}>
+      <Surface tone="subtle" padding={TOKENS.spacing[16]} style={{ border: `1px solid ${hasFiles ? TOKENS.color.brand.borderMuted : TOKENS.color.stroke.default}`, opacity: disabled ? 0.6 : 1 }}>
         <Row align="center" gap={TOKENS.spacing[14]}>
-          <span style={{ width: TOKENS.size[40], height: TOKENS.size[40], borderRadius: TOKENS.radius[10], display: "grid", placeItems: "center", color: file ? TOKENS.color.feedback.success : TOKENS.color.brand.primary, background: file ? TOKENS.color.feedback.successSoft : TOKENS.color.brand.soft }}>
-            <Icon size="md">{file ? <CheckCheckIcon /> : <FileXlsIcon />}</Icon>
+          <span style={{ width: TOKENS.size[40], height: TOKENS.size[40], borderRadius: TOKENS.radius[10], display: "grid", placeItems: "center", color: hasFiles ? TOKENS.color.feedback.success : TOKENS.color.brand.primary, background: hasFiles ? TOKENS.color.feedback.successSoft : TOKENS.color.brand.soft }}>
+            <Icon size="md">{hasFiles ? <CheckCheckIcon /> : <FileXlsIcon />}</Icon>
           </span>
           <Stack gap={TOKENS.spacing[3]} style={{ minWidth: 0, flex: 1 }}>
             <Text size="sm" weight={800}>{label}</Text>
-            {file ? <Text size="xs" tone="secondary" truncate title={file.name}>{file.name} · {readableSize(file.size)}</Text> : <Text size="xs" tone="muted">{hint}</Text>}
+            {hasFiles ? <Text size="xs" tone="secondary" truncate title={selectedNames}>{selectionSummary}</Text> : <Text size="xs" tone="muted">{hint}</Text>}
           </Stack>
-          <Badge variant={file ? "success" : "neutral"}>{file ? "Selecionada" : "Escolher .xlsx"}</Badge>
+          <Badge variant={hasFiles ? "success" : "neutral"}>{hasFiles ? `${files.length} selecionada${files.length === 1 ? "" : "s"}` : "Escolher .xlsx"}</Badge>
         </Row>
       </Surface>
-      <input id={id} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={disabled} onChange={handleChange} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }} />
+      <input id={id} type="file" multiple accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={disabled} onChange={handleChange} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }} />
     </label>
   );
 }
@@ -53,7 +60,30 @@ function FeedbackPanel({ icon, children, tone }: { icon: ReactNode; children: Re
 export function SpreadsheetImportControl({ controller }: { controller: SpreadsheetImportController }) {
   const [isClearConfirmationOpen, setIsClearConfirmationOpen] = useState(false);
   const meta = controller.dashboard?.meta;
-  const primaryLabel = controller.status === "reading" ? "Lendo arquivos…" : controller.status === "processing" ? SPREADSHEET_IMPORT_COPY.processing : SPREADSHEET_IMPORT_COPY.confirm;
+  const primaryLabel = controller.status === "reading"
+    ? "Lendo arquivos…"
+    : controller.status === "processing"
+      ? SPREADSHEET_IMPORT_COPY.processing
+      : controller.status === "saving"
+        ? "Salvando histórico…"
+        : SPREADSHEET_IMPORT_COPY.confirm;
+  const loadingCopy = controller.status === "reading"
+    ? {
+        title: "Lendo as planilhas",
+        subtitle: controller.readProgress
+          ? `Arquivo ${controller.readProgress.current} de ${controller.readProgress.total}: ${controller.readProgress.fileName}`
+          : "Validando os relatórios de atendimentos e ordens de serviço.",
+      }
+    : controller.status === "saving"
+      ? {
+          title: "Salvando o histórico",
+          subtitle: "Atualizando a base local e preparando os painéis para consulta.",
+        }
+      : {
+          title: "Processando os dados",
+          subtitle: "Classificando registros, tratando duplicidades e calculando os indicadores.",
+        };
+  const showImportLoading = controller.status === "reading" || controller.status === "processing" || controller.status === "saving";
 
   return (
     <>
@@ -94,8 +124,8 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
         footer={<><Button variant="soft" size="lg" onPress={controller.closeImport} disabled={controller.isProcessing}>{controller.status === "success" ? "Concluir" : SPREADSHEET_IMPORT_COPY.cancel}</Button>{controller.status !== "success" && <Button size="lg" onPress={() => void controller.importSpreadsheets()} disabled={!controller.canImport}>{primaryLabel}</Button>}</>}
       >
         <Stack gap={TOKENS.spacing[16]}>
-          <FilePicker id="attendance-spreadsheet" label={SPREADSHEET_IMPORT_COPY.attendanceLabel} hint={SPREADSHEET_IMPORT_COPY.attendanceHint} file={controller.files.attendance} disabled={controller.isProcessing} onChange={controller.selectAttendance} />
-          <FilePicker id="service-orders-spreadsheet" label={SPREADSHEET_IMPORT_COPY.serviceOrdersLabel} hint={SPREADSHEET_IMPORT_COPY.serviceOrdersHint} file={controller.files.serviceOrders} disabled={controller.isProcessing} onChange={controller.selectServiceOrders} />
+          <FilePicker id="attendance-spreadsheet" label={SPREADSHEET_IMPORT_COPY.attendanceLabel} hint={SPREADSHEET_IMPORT_COPY.attendanceHint} files={controller.files.attendance} disabled={controller.isProcessing} onChange={controller.selectAttendance} />
+          <FilePicker id="service-orders-spreadsheet" label={SPREADSHEET_IMPORT_COPY.serviceOrdersLabel} hint={SPREADSHEET_IMPORT_COPY.serviceOrdersHint} files={controller.files.serviceOrders} disabled={controller.isProcessing} onChange={controller.selectServiceOrders} />
           <Row align="flex-start" gap={TOKENS.spacing[8]} style={{ color: TOKENS.color.content.muted }}><Icon size="xs" color="currentColor"><DatabaseIcon /></Icon><Text size="xs" tone="muted" lineHeight={1.5}>{SPREADSHEET_IMPORT_COPY.privacy}</Text></Row>
           {controller.error && <FeedbackPanel icon={<TriangleAlertIcon />} tone="danger">{controller.error}</FeedbackPanel>}
           {controller.summary && <FeedbackPanel icon={<CheckCheckIcon />} tone="success">{controller.summary}</FeedbackPanel>}
@@ -117,6 +147,22 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
           Esta ação removerá o histórico importado de atendimentos e ordens de serviço deste navegador. Os arquivos originais não serão alterados, mas será necessário importá-los novamente para reconstruir os painéis.
         </Text>
       </DeleteConfirmModal>
+
+      <LoadingOverlay
+        active={showImportLoading}
+        logo={(
+          <img
+            src="/nexus-sales-intelligence-app-icon-512.png"
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            style={{ width: TOKENS.size[128], height: TOKENS.size[128], objectFit: "cover", borderRadius: TOKENS.radius[20] }}
+          />
+        )}
+        title={<Text size="title-lg" weight={800}>{loadingCopy.title}</Text>}
+        subtitle={<Text size="md" tone="secondary" lineHeight={1.6} style={{ maxWidth: 520 }}>{loadingCopy.subtitle}</Text>}
+        footer={<Text size="xs" tone="muted">Mantenha esta janela aberta até a conclusão da importação.</Text>}
+      />
     </>
   );
 }

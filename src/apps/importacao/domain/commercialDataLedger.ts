@@ -21,12 +21,21 @@ function mergeById<T extends { id: string }>(current: ReadonlyArray<T>, incoming
   return [...records.values()];
 }
 
-function replaceEventsForImportedProtocols<T extends { id: string }>(
+function mergeCommercialEvents<T extends { id: string; businessKey?: string }>(
+  current: ReadonlyArray<T>,
+  incoming: ReadonlyArray<T>,
+): ReadonlyArray<T> {
+  const records = new Map(current.map((record) => [record.businessKey ?? record.id, record]));
+  for (const record of incoming) records.set(record.businessKey ?? record.id, record);
+  return [...records.values()];
+}
+
+function replaceEventsForImportedProtocols<T extends { id: string; businessKey?: string }>(
   current: ReadonlyArray<T>,
   incoming: ReadonlyArray<T>,
   importedProtocols: ReadonlySet<string>,
 ): ReadonlyArray<T> {
-  return mergeById(current.filter((event) => !importedProtocols.has(event.id)), incoming);
+  return mergeCommercialEvents(current.filter((event) => !importedProtocols.has(event.id)), incoming);
 }
 
 export function mergeCommercialLedger(
@@ -36,16 +45,20 @@ export function mergeCommercialLedger(
   const attendanceIds = new Set(current.attendance.map((record) => record.id));
   const serviceOrderIds = new Set(current.serviceOrders.map((record) => record.id));
   const importedProtocols = new Set(incoming.attendance.map((record) => record.id));
+  const importedServiceOrderMonths = new Set(incoming.serviceOrders.map((record) => commercialMonthKey(record.date)));
 
   return {
     ledger: {
       version: 1,
       attendance: mergeById(current.attendance, incoming.attendance),
       serviceOrders: mergeById(current.serviceOrders, incoming.serviceOrders),
-      sales: replaceEventsForImportedProtocols(current.sales, incoming.sales, importedProtocols),
+      sales: mergeCommercialEvents(current.sales.filter((event) => !importedProtocols.has(event.attendanceId ?? event.id)), incoming.sales),
       renewals: replaceEventsForImportedProtocols(current.renewals, incoming.renewals, importedProtocols),
       cancellations: replaceEventsForImportedProtocols(current.cancellations, incoming.cancellations, importedProtocols),
-      reactivations: replaceEventsForImportedProtocols(current.reactivations, incoming.reactivations, importedProtocols),
+      reactivations: mergeById(
+        current.reactivations.filter((event) => !importedServiceOrderMonths.has(commercialMonthKey(event.date))),
+        incoming.reactivations,
+      ),
     },
     statistics: {
       attendanceAdded: incoming.attendance.filter((record) => !attendanceIds.has(record.id)).length,
@@ -96,10 +109,9 @@ export function selectCommercialLedgerMonth(
   const reactivations = ledger.reactivations.filter((event) => inPeriod(event.date));
   const serviceOrders = ledger.serviceOrders.filter((record) => inPeriod(record.date));
   const classifiedProtocols = new Set([
-    ...sales.map((event) => event.id),
+    ...sales.map((event) => event.attendanceId ?? event.id),
     ...renewals.map((event) => event.id),
     ...cancellations.map((event) => event.id),
-    ...reactivations.map((event) => event.id),
   ]);
 
   return {

@@ -14,6 +14,10 @@ export const SALES_OVERVIEW_COPY = {
   planMixDescription: "Participação do plano líder no total vendido.",
   operationalPulse: "Pulso operacional",
   operationalPulseDescription: "Movimentos que ajudam a explicar a saúde da carteira.",
+  printReport: "Imprimir relatório",
+  printReportDescription: "Gera um PDF A4 completo com todas as abas e os três mapas, pronto para impressão.",
+  printingReport: "Gerando PDF...",
+  printReportError: "Não foi possível gerar o PDF. Tente novamente.",
   nav: ["Visão geral", "Vendas", "Renovações", "Cancelamentos", "Localidades", "Equipe comercial"],
 } as const;
 

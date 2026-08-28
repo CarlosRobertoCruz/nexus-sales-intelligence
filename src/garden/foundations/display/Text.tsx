@@ -82,6 +82,7 @@ const Text = forwardRef<HTMLSpanElement, TextProps>(
           }),
 
           fontSize: resolvedSize,
+          fontFamily: TOKENS.typography.family.sans,
           fontWeight: TOKENS.typography.weight[weight],
           color: tone ? toneMap[tone] : "inherit",
 

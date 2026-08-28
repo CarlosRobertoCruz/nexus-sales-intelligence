@@ -9,8 +9,14 @@ export type ImportedWorksheet = {
 };
 
 export type SpreadsheetImportFiles = {
-  attendance: File | null;
-  serviceOrders: File | null;
+  attendance: ReadonlyArray<File>;
+  serviceOrders: ReadonlyArray<File>;
+};
+
+export type SpreadsheetReadProgress = {
+  current: number;
+  total: number;
+  fileName: string;
 };
 
 export type SpreadsheetImportResult = {
@@ -18,10 +24,12 @@ export type SpreadsheetImportResult = {
   summary: string;
 };
 
-export type ImportStepStatus = "idle" | "reading" | "processing" | "success" | "error";
+export type ImportStepStatus = "idle" | "reading" | "processing" | "saving" | "success" | "error";
 
 export type ClassifiedSale = {
   id: string;
+  attendanceId?: string;
+  businessKey?: string;
   date: Date;
   customer: string;
   planId: SalesPlanId;
@@ -35,6 +43,7 @@ export type ClassifiedSale = {
 
 export type ClassifiedRenewal = {
   id: string;
+  businessKey?: string;
   date: Date;
   customer: string;
   planLabel: string;
