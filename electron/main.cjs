@@ -1,9 +1,11 @@
 const { app, BrowserWindow, ipcMain, net, session, shell } = require("electron");
+const fs = require("node:fs/promises");
 const path = require("node:path");
 
 const DEVELOPMENT_URL = "http://127.0.0.1:5173";
 const OPENSTREETMAP_TILE_HOST = "tile.openstreetmap.org";
 const PROJECT_URL = "https://github.com/CarlosRobertoCruz/nexus-sales-intelligence";
+const MAP_CACHE_MIGRATION = "map-cache-v2";
 
 function getMapUserAgent() {
   return `NexusSalesIntelligence/${app.getVersion()} (+${PROJECT_URL})`;
@@ -19,6 +21,26 @@ function configureMapRequests() {
       callback({ requestHeaders: details.requestHeaders });
     },
   );
+}
+
+async function migrateLegacyMapCache() {
+  const markerPath = path.join(app.getPath("userData"), MAP_CACHE_MIGRATION);
+  try {
+    await fs.access(markerPath);
+    return;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      console.warn("Não foi possível verificar a migração do cache de mapas.", error);
+      return;
+    }
+  }
+
+  try {
+    await session.defaultSession.clearCache();
+    await fs.writeFile(markerPath, app.getVersion(), "utf8");
+  } catch (error) {
+    console.warn("Não foi possível renovar o cache antigo de mapas.", error);
+  }
 }
 
 function getWindowIcon() {
@@ -84,10 +106,7 @@ ipcMain.handle("map-tile:fetch", async (_event, requestedUrl) => {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await net.fetch(tileUrl.toString(), {
-      cache: "force-cache",
-      signal: controller.signal,
-    });
+    const response = await net.fetch(tileUrl.toString(), { signal: controller.signal });
     if (!response.ok) throw new Error(`OpenStreetMap respondeu com ${response.status}`);
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.startsWith("image/")) throw new Error("OpenStreetMap retornou um conteúdo inválido.");
@@ -100,8 +119,9 @@ ipcMain.handle("map-tile:fetch", async (_event, requestedUrl) => {
   }
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   configureMapRequests();
+  await migrateLegacyMapCache();
   createWindow();
 
   app.on("activate", () => {
