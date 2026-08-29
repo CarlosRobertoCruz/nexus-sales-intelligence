@@ -395,6 +395,26 @@ async function fetchMapTile(zoom: number, tileX: number, tileY: number): Promise
   }
 }
 
+function mapTileFingerprint(image: ImageBitmap): string {
+  const sample = document.createElement("canvas");
+  sample.width = 32;
+  sample.height = 32;
+  const context = sample.getContext("2d", { willReadFrequently: true });
+  if (!context) return `${image.width}x${image.height}`;
+  context.drawImage(image, 0, 0, sample.width, sample.height);
+  const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+  let hash = 2166136261;
+  for (let index = 0; index < pixels.length; index += 4) {
+    hash ^= pixels[index];
+    hash = Math.imul(hash, 16777619);
+    hash ^= pixels[index + 1];
+    hash = Math.imul(hash, 16777619);
+    hash ^= pixels[index + 2];
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
 async function renderOpenStreetMapBase(locations: ReadonlyArray<MappedCommercialLocation>): Promise<{ canvas: HTMLCanvasElement; viewport: MapViewport }> {
   const viewport = createMapViewport(locations);
   const canvas = document.createElement("canvas");
@@ -424,6 +444,16 @@ async function renderOpenStreetMapBase(locations: ReadonlyArray<MappedCommercial
 
   const loadedTiles = (await Promise.all(tiles)).filter((tile): tile is { image: ImageBitmap; x: number; y: number } => tile !== null);
   if (!loadedTiles.length) throw new Error("Não foi possível carregar a base do OpenStreetMap");
+  const fingerprintFrequency = new Map<string, number>();
+  loadedTiles.forEach(({ image }) => {
+    const fingerprint = mapTileFingerprint(image);
+    fingerprintFrequency.set(fingerprint, (fingerprintFrequency.get(fingerprint) ?? 0) + 1);
+  });
+  const repeatedTiles = Math.max(0, ...fingerprintFrequency.values());
+  if (loadedTiles.length >= 4 && repeatedTiles / loadedTiles.length >= .7) {
+    loadedTiles.forEach(({ image }) => image.close());
+    throw new Error("O provedor devolveu blocos de mapa repetidos ou bloqueados.");
+  }
   loadedTiles.forEach(({ image, x, y }) => {
     context.drawImage(image, Math.round(x), Math.round(y), MAP_CANVAS.tileSize + 1, MAP_CANVAS.tileSize + 1);
     image.close();

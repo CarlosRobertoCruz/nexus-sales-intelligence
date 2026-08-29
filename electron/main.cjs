@@ -1,8 +1,25 @@
-const { app, BrowserWindow, ipcMain, net, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, net, session, shell } = require("electron");
 const path = require("node:path");
 
 const DEVELOPMENT_URL = "http://127.0.0.1:5173";
 const OPENSTREETMAP_TILE_HOST = "tile.openstreetmap.org";
+const PROJECT_URL = "https://github.com/CarlosRobertoCruz/nexus-sales-intelligence";
+
+function getMapUserAgent() {
+  return `NexusSalesIntelligence/${app.getVersion()} (+${PROJECT_URL})`;
+}
+
+function configureMapRequests() {
+  const userAgent = getMapUserAgent();
+  session.defaultSession.setUserAgent(userAgent, "pt-BR,pt;q=0.9,en;q=0.8");
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: [`https://${OPENSTREETMAP_TILE_HOST}/*`] },
+    (details, callback) => {
+      details.requestHeaders["User-Agent"] = userAgent;
+      callback({ requestHeaders: details.requestHeaders });
+    },
+  );
+}
 
 function getWindowIcon() {
   return app.isPackaged
@@ -69,14 +86,13 @@ ipcMain.handle("map-tile:fetch", async (_event, requestedUrl) => {
   try {
     const response = await net.fetch(tileUrl.toString(), {
       cache: "force-cache",
-      headers: {
-        "User-Agent": `NexusSalesIntelligence/${app.getVersion()} (+https://github.com/CarlosRobertoCruz/nexus-sales-intelligence)`,
-      },
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`OpenStreetMap respondeu com ${response.status}`);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.startsWith("image/")) throw new Error("OpenStreetMap retornou um conteúdo inválido.");
     return {
-      contentType: response.headers.get("content-type") ?? "image/png",
+      contentType,
       data: await response.arrayBuffer(),
     };
   } finally {
@@ -85,6 +101,7 @@ ipcMain.handle("map-tile:fetch", async (_event, requestedUrl) => {
 });
 
 app.whenReady().then(() => {
+  configureMapRequests();
   createWindow();
 
   app.on("activate", () => {
