@@ -195,22 +195,21 @@ function attendanceForInstallationOrder(order: ServiceOrder, attendanceRows: Rea
     if (order.customerCode && customerCode) return order.customerCode === customerCode;
     return Boolean(order.customerName) && normalize(order.customerName) === normalize(text(row, "nome_razaosocial"));
   });
-  const preferred = sameCustomer.filter(isInstallationAttendance);
-  const candidates = preferred.length ? preferred : sameCustomer;
   const executionStartedAt = order.executionStartedAt?.getTime() ?? 0;
+  const candidates = sameCustomer.filter((row) => {
+    if (!isInstallationAttendance(row)) return false;
+    const attendanceDate = parseDate(row.data_cadastro)?.getTime();
+    return attendanceDate !== undefined && attendanceDate <= executionStartedAt;
+  });
   return [...candidates].sort((left, right) => {
     const leftDate = parseDate(left.data_cadastro)?.getTime() ?? 0;
     const rightDate = parseDate(right.data_cadastro)?.getTime() ?? 0;
-    const leftAfterExecution = leftDate > executionStartedAt ? 1 : 0;
-    const rightAfterExecution = rightDate > executionStartedAt ? 1 : 0;
-    return leftAfterExecution - rightAfterExecution
-      || Math.abs(executionStartedAt - leftDate) - Math.abs(executionStartedAt - rightDate);
+    return Math.abs(executionStartedAt - leftDate) - Math.abs(executionStartedAt - rightDate);
   })[0];
 }
 
-function installationBusinessKey(row: RowRecord, order: ServiceOrder): string {
-  const customer = order.customerCode || normalize(order.customerName) || eventCustomerKey(row);
-  return `sale:cliente:${customer}`;
+function installationBusinessKey(order: ServiceOrder): string {
+  return `sale:os:${order.id}`;
 }
 
 function extractPlan(combinedText: string): { id: SalesPlanId; label: string } {
@@ -469,25 +468,26 @@ export function classifyCommercialRows(
   for (const linkedOrder of orders.byId.values()) {
     if (!isCompletedInstallationOrder(linkedOrder) || !linkedOrder.executionFinishedAt) continue;
     const row = attendanceForInstallationOrder(linkedOrder, attendanceRows);
-    const combined = row ? installationText(row) : linkedOrder.description;
-    const commercialDate = (row ? parseDate(row.data_cadastro) : null) ?? linkedOrder.scheduledAt ?? linkedOrder.executionFinishedAt;
+    if (!row) continue;
+    const combined = installationText(row);
+    const commercialDate = linkedOrder.executionFinishedAt;
     const plan = extractPlan(combined);
-    const seller = resolveSeller(row ?? {}, combined);
+    const seller = resolveSeller(row, combined);
     sales.push({
       id: linkedOrder.id,
-      attendanceId: row ? text(row, "protocolo") : undefined,
-      businessKey: installationBusinessKey(row ?? {}, linkedOrder),
+      attendanceId: text(row, "protocolo"),
+      businessKey: installationBusinessKey(linkedOrder),
       date: commercialDate,
-      customer: text(row ?? {}, "nome_razaosocial") || linkedOrder.customerName || "Cliente não informado",
+      customer: text(row, "nome_razaosocial") || linkedOrder.customerName || "Cliente não informado",
       planId: plan.id,
       planLabel: plan.label,
       sellerId: seller.id,
       sellerName: seller.name,
-      location: row ? locationFromAttendance(row, linkedOrder, combined) : linkedOrder.location || "Não informada",
+      location: locationFromAttendance(row, linkedOrder, combined),
       installed: true,
       withdrawn: false,
     });
-    if (row) classifiedProtocols.add(text(row, "protocolo"));
+    classifiedProtocols.add(text(row, "protocolo"));
   }
 
   if (!dates.length) throw new Error("Não foi possível identificar o período dos atendimentos.");
@@ -511,7 +511,7 @@ export function classifyCommercialRows(
   if (uniqueSales.length < sales.length || uniqueRenewals.length < renewals.length) {
     warnings.push(`${sales.length - uniqueSales.length} venda(s) e ${renewals.length - uniqueRenewals.length} renovação(ões) duplicadas foram consolidadas por evento comercial.`);
   }
-  warnings.push("A OS de instalação finalizada, com início e término executados válidos, confirma a venda; o atendimento identifica a atendente e o mês comercial. Renovações e cancelamentos são classificados pelo atendimento; reativações, pelo tipo da OS.");
+  warnings.push("A venda exige um atendimento de instalação anterior e uma OS de instalação finalizada, com início e término executados válidos. O atendimento identifica a atendente e a execução da OS define o mês comercial. Renovações e cancelamentos são classificados pelo atendimento; reativações, pelo tipo da OS.");
 
   return {
     attendanceFileName: attendance.fileName,
