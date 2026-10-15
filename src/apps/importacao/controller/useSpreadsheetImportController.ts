@@ -1,3 +1,4 @@
+import { serverMode, salesApi } from '@/core/services/salesApi';
 import { useEffect, useState } from "react";
 import type { CommercialDashboardBundle } from "@/core/types/commercialDashboard";
 import { buildLocationMetrics } from "@/apps/localidades/domain/buildLocationMetrics";
@@ -113,6 +114,16 @@ export function useSpreadsheetImportController() {
     setSelectedPeriod(periodKey);
   }
 
+  async function refreshCentralData(): Promise<void> {
+    const stored = await loadCommercialData();
+    const nextLedger = stored.ledger ?? EMPTY_COMMERCIAL_LEDGER;
+    const periods = listCommercialLedgerPeriods(nextLedger);
+    const period = periods.some(p => p.value === selectedPeriodValue) ? selectedPeriodValue : periods[0]?.value;
+    setLedger(nextLedger);
+    setDashboard(period ? buildDashboardForPeriod(nextLedger, period) : null);
+    setSelectedPeriod(period ?? null);
+  }
+
   async function clearData(): Promise<void> {
     try {
       await clearCommercialData();
@@ -148,6 +159,16 @@ export function useSpreadsheetImportController() {
       setStatus("processing");
       setReadProgress(null);
       await yieldToInterface();
+      if (serverMode) {
+        setStatus("saving");
+        const result = await salesApi<{ records: number }>("/import", {
+          method: "POST", body: JSON.stringify({ attendance, serviceOrders }),
+        });
+        await refreshCentralData();
+        setSummary(`${result.records.toLocaleString("pt-BR")} registros processados na base compartilhada.`);
+        setStatus("success");
+        return;
+      }
       const classified = classifyCommercialRows(attendance, serviceOrders);
       const { ledger: nextLedger, statistics } = mergeCommercialLedger(ledger, classified);
       const activePeriodKey = commercialMonthKey(classified.periodEnd);
@@ -176,6 +197,7 @@ export function useSpreadsheetImportController() {
 
   return {
     dashboard,
+    refreshCentralData,
     files,
     isOpen,
     status,

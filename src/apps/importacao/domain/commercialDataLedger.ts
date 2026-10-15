@@ -91,7 +91,7 @@ function formatMonthLabel(periodKey: string): string {
 }
 
 export function listCommercialLedgerPeriods(ledger: CommercialDataLedger): ReadonlyArray<CommercialPeriodOption> {
-  const keys = new Set(ledger.attendance.map((record) => commercialMonthKey(record.date)));
+  const keys = new Set([ ...ledger.attendance, ...ledger.serviceOrders, ...ledger.sales, ...ledger.renewals, ...ledger.cancellations, ...ledger.reactivations ].map((record) => commercialMonthKey(record.date)));
   return [...keys].sort((a, b) => b.localeCompare(a)).map((value) => ({ value, label: formatMonthLabel(value) }));
 }
 

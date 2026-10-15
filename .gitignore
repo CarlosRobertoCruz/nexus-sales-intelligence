@@ -42,3 +42,8 @@ tmp
 *.njsproj
 *.sln
 *.sw?
+
+# Server build and database backups
+server-dist/
+backups/
+!.env.vps.example

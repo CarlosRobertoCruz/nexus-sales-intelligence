@@ -12,7 +12,14 @@ import { RenewalsPage } from "@/apps/renovacoes/ui/RenewalsPage";
 import { SalesOverviewPage } from "@/apps/visaoGeral/ui/SalesOverviewPage";
 import { SalesPage } from "@/apps/vendas/ui/SalesPage";
 
+import { serverMode } from '@/core/services/salesApi';
+import { ServerAccess } from '@/apps/shell/ui/ServerAccess';
+
 export default function App() {
+  return serverMode ? <ServerAccess><DashboardApp /></ServerAccess> : <DashboardApp />;
+}
+
+function DashboardApp() {
   const [activePage, setActivePage] = useState<AppPage>("overview");
   const spreadsheetImport = useSpreadsheetImportController();
   const dashboard = spreadsheetImport.dashboard;

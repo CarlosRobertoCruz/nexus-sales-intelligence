@@ -1,0 +1,36 @@
+name: Validate web and API
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm ci --prefix server --ignore-scripts
+      - run: npm run lint
+      - run: npm run test:server
+      - run: npm run build
+        env:
+          VITE_DATA_MODE: server
+      - run: touch .env .env.vps
+      - run: docker compose --env-file .env.vps.example -f compose.vps.yml config --quiet
+        env:
+          # Compose validates file existence; these contain no real credentials.
+          COMPOSE_DISABLE_ENV_FILE: "1"
+        # Private env files are never supplied to GitHub Actions.
+      - run: docker build --target api -t nexus-sales-api:test .
+      - run: docker build --target web -t nexus-sales-web:test .

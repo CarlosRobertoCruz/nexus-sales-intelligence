@@ -1,3 +1,4 @@
+import { serverMode, salesApi } from '@/core/services/salesApi';
 import type { CommercialDashboardBundle } from "@/core/types/commercialDashboard";
 import type {
   ClassifiedCancellation,
@@ -227,6 +228,10 @@ async function writeCommercialData(
 }
 
 export async function loadCommercialData(): Promise<PersistedCommercialData> {
+  if (serverMode) {
+    const data = await salesApi<{ ledger: unknown }>("/data");
+    return { ledger: hydrateSerializedLedger(data.ledger), dashboard: null };
+  }
   const database = await openDatabase();
   try {
     const current = await readCurrentData(database);
@@ -248,6 +253,7 @@ export async function loadCommercialData(): Promise<PersistedCommercialData> {
 }
 
 export async function saveCommercialDashboard(dashboard: CommercialDashboardBundle): Promise<void> {
+  if (serverMode) return;
   const database = await openDatabase();
   try {
     await writeCommercialData(database, { dashboard });
@@ -257,6 +263,7 @@ export async function saveCommercialDashboard(dashboard: CommercialDashboardBund
 }
 
 export async function saveCommercialData(ledger: CommercialDataLedger, dashboard: CommercialDashboardBundle): Promise<void> {
+  if (serverMode) throw new Error("Importe as planilhas pela API central.");
   const database = await openDatabase();
   try {
     await writeCommercialData(database, { ledger, dashboard });
@@ -266,6 +273,7 @@ export async function saveCommercialData(ledger: CommercialDataLedger, dashboard
 }
 
 export async function clearCommercialData(): Promise<void> {
+  if (serverMode) throw new Error("A limpeza da base compartilhada está desabilitada.");
   const database = await openDatabase();
   try {
     const storeNames = database.objectStoreNames.contains(LEGACY_INDEXED_STORE)
