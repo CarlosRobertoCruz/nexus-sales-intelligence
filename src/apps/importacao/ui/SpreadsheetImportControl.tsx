@@ -1,3 +1,5 @@
+import { serverMode } from '@/core/services/salesApi';
+import { HubsoftSyncControl } from './HubsoftSyncControl';
 import { useState, type ChangeEvent, type ReactNode } from "react";
 import { APP_ICON_URL } from "@/core/assets/appAssets";
 import { Badge, Button, Icon, LoadingOverlay, Modal, Row, Stack, Surface, Text } from "@/garden/foundations";
@@ -78,7 +80,7 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
     : controller.status === "saving"
       ? {
           title: "Salvando o histórico",
-          subtitle: "Atualizando a base local e preparando os painéis para consulta.",
+          subtitle: "Atualizando a base comercial e preparando os painéis para consulta.",
         }
       : {
           title: "Processando os dados",
@@ -96,12 +98,14 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
           </Row>
           <Stack gap={TOKENS.spacing[3]}>
             <Text size="md" weight={700}>{controller.isHydrating ? "Carregando histórico…" : meta?.referenceMonth ?? SPREADSHEET_IMPORT_COPY.emptyStatus}</Text>
-            <Text size="xs" tone="muted" lineHeight={1.5}>{controller.isHydrating ? "Preparando a base armazenada neste navegador." : meta ? `${meta.quality.attendanceRows.toLocaleString("pt-BR")} atendimentos · ${meta.quality.serviceOrderRows.toLocaleString("pt-BR")} OS` : "Importe os dois relatórios para preencher o painel."}</Text>
+            <Text size="xs" tone="muted" lineHeight={1.5}>{controller.isHydrating ? "Preparando a base comercial." : meta ? `${meta.quality.attendanceRows.toLocaleString("pt-BR")} atendimentos · ${meta.quality.serviceOrderRows.toLocaleString("pt-BR")} OS` : "Importe os dois relatórios para preencher o painel."}</Text>
           </Stack>
+          {serverMode && controller.error && !controller.isOpen && <Text size="xs" tone="muted">{controller.error}</Text>}
+          {serverMode && <HubsoftSyncControl onUpdated={controller.refreshCentralData} disabled={controller.isProcessing} />}
           <Button variant="soft" size="md" fullWidth onPress={controller.openImport} disabled={controller.isHydrating}>
             <Row align="center" justify="center" gap={TOKENS.spacing[8]}><Icon size="sm"><DatabaseIcon /></Icon>{SPREADSHEET_IMPORT_COPY.button}</Row>
           </Button>
-          {meta && (
+          {!serverMode && meta && (
             <Button
               variant="soft"
               size="sm"
@@ -127,7 +131,7 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
         <Stack gap={TOKENS.spacing[16]}>
           <FilePicker id="attendance-spreadsheet" label={SPREADSHEET_IMPORT_COPY.attendanceLabel} hint={SPREADSHEET_IMPORT_COPY.attendanceHint} files={controller.files.attendance} disabled={controller.isProcessing} onChange={controller.selectAttendance} />
           <FilePicker id="service-orders-spreadsheet" label={SPREADSHEET_IMPORT_COPY.serviceOrdersLabel} hint={SPREADSHEET_IMPORT_COPY.serviceOrdersHint} files={controller.files.serviceOrders} disabled={controller.isProcessing} onChange={controller.selectServiceOrders} />
-          <Row align="flex-start" gap={TOKENS.spacing[8]} style={{ color: TOKENS.color.content.muted }}><Icon size="xs" color="currentColor"><DatabaseIcon /></Icon><Text size="xs" tone="muted" lineHeight={1.5}>{SPREADSHEET_IMPORT_COPY.privacy}</Text></Row>
+          <Row align="flex-start" gap={TOKENS.spacing[8]} style={{ color: TOKENS.color.content.muted }}><Icon size="xs" color="currentColor"><DatabaseIcon /></Icon><Text size="xs" tone="muted" lineHeight={1.5}>{serverMode ? "Os relatórios serão enviados ao servidor e compartilhados com os usuários autorizados." : SPREADSHEET_IMPORT_COPY.privacy}</Text></Row>
           {controller.error && <FeedbackPanel icon={<TriangleAlertIcon />} tone="danger">{controller.error}</FeedbackPanel>}
           {controller.summary && <FeedbackPanel icon={<CheckCheckIcon />} tone="success">{controller.summary}</FeedbackPanel>}
           {controller.status === "success" && controller.dashboard?.meta.quality.warnings.map((warning) => <FeedbackPanel key={warning} icon={<TriangleAlertIcon />} tone="warning">{warning}</FeedbackPanel>)}

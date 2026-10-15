@@ -1,0 +1,86 @@
+name: lab-nexus-sales
+x-api: &api
+  image: lab-nexus-sales-api:${APP_VERSION:-local}
+  build:
+    context: .
+    target: api
+  env_file:
+    - .env
+    - .env.vps
+  environment:
+    NODE_ENV: production
+    TZ: America/Sao_Paulo
+  read_only: true
+  tmpfs:
+    - /tmp:size=32m,mode=1777
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  mem_limit: 512m
+  pids_limit: 100
+  networks: [internal, database]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+services:
+  api:
+    <<: *api
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:3001/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+  migrate:
+    <<: *api
+    profiles: [tools]
+    restart: "no"
+    command: [node, server/migrate.mjs]
+  web:
+    image: lab-nexus-sales-web:${APP_VERSION:-local}
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - 127.0.0.1:8089:8080
+    networks: [internal, traefik]
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 50
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${TRAEFIK_NETWORK:-n8n-traefik_app_network}
+      traefik.http.routers.nexus-sales.rule: Host(`${SALES_DOMAIN:-sales.nexusfibra.net.br}`)
+      traefik.http.routers.nexus-sales.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
+      traefik.http.routers.nexus-sales.tls: "true"
+      traefik.http.routers.nexus-sales.tls.certresolver: ${TRAEFIK_CERTRESOLVER:-le}
+      traefik.http.services.nexus-sales.loadbalancer.server.port: "8080"
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8080/healthz]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+networks:
+  internal: {}
+  database:
+    external: true
+    name: ${DATABASE_NETWORK:-lab_network}
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK:-n8n-traefik_app_network}

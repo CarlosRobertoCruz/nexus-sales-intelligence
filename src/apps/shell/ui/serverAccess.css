@@ -1,0 +1,97 @@
+.sales-access {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #0c1020;
+  color: #eef1ff;
+  font-family: Inter, sans-serif;
+}
+.sales-login {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid #424663;
+  border-radius: 16px;
+  background: #161b30;
+}
+.sales-login h1 {
+  font-size: 24px;
+  margin: 0;
+}
+.sales-login p {
+  line-height: 1.5;
+}
+.sales-login label {
+  display: grid;
+  gap: 8px;
+}
+.sales-login input,
+.sales-login button,
+.sales-account button,
+.sales-sync input,
+.sales-sync button {
+  font: inherit;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid #777eaa;
+  padding: 8px 12px;
+  background: #171c32;
+  color: #fff;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.sales-login button,
+.sales-sync button {
+  background: #6543d9;
+  cursor: pointer;
+}
+.sales-login button:disabled,
+.sales-sync button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.sales-account {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  padding: 6px 16px;
+  background: #161b30;
+  color: #fff;
+  font:
+    14px Inter,
+    sans-serif;
+}
+.sales-sync {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  font:
+    13px Inter,
+    sans-serif;
+  min-width: 0;
+}
+.sales-sync label {
+  display: grid;
+  gap: 6px;
+}
+.sales-sync p {
+  line-height: 1.5;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.sales-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sales-sync-actions button {
+  flex: 1 1 140px;
+}
+.sales-sync input {
+  width: 100%;
+  color-scheme: dark;
+}

@@ -73,7 +73,7 @@ function parseDate(value: SpreadsheetCell): Date | null {
 }
 
 function extractOrderId(combinedText: string): string | null {
-  return combinedText.match(/ordem de servi[cç]o(?: de)?\s*(?:n[ºo°.]*)?\s*(\d{12,})/i)?.[1] ?? null;
+  return combinedText.match(/ordem de servi[cç]o(?: de)?\s*(?:n[ºo°.]*)?\s*(\d+)/i)?.[1] ?? null;
 }
 
 function extractTicketIds(combinedText: string): ReadonlyArray<string> {
@@ -342,7 +342,7 @@ function orderIndex(rows: ReadonlyArray<RowRecord>): ServiceOrderIndex {
   const byCustomerName = new Map<string, ServiceOrder[]>();
   for (const row of rows) {
     const id = text(row, "numero_ordem_servico");
-    if (!/^\d{12,}$/.test(id)) continue;
+    if (!/^\d+$/.test(id)) continue;
     const order: ServiceOrder = {
       id,
       customerCode: text(row, "codigo_cliente"),
@@ -397,8 +397,8 @@ export function classifyCommercialRows(
   attendance: ImportedWorksheet,
   serviceOrders: ImportedWorksheet,
 ): ClassifiedCommercialImport {
-  const attendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d{12,}$/.test(text(row, "protocolo"))), "protocolo");
-  const osRows = deduplicateRows(rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço").filter((row) => /^\d{12,}$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
+  const attendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
+  const osRows = deduplicateRows(rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço").filter((row) => /^\d+$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
   if (!attendanceRows.length) throw new Error("Nenhum atendimento válido foi encontrado no arquivo selecionado.");
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
 
