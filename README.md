@@ -4,6 +4,14 @@ Aplicação de inteligência comercial da Nexus Fibra que transforma relatórios
 
 O sistema cruza planilhas de atendimentos e ordens de serviço, consolida registros duplicados e apresenta os resultados em uma interface preparada para análise e impressão.
 
+## Versao web na VPS e integracao Hubsoft
+
+O projeto agora tambem possui backend Node, login individual, base compartilhada PostgreSQL e consultas Hubsoft limitadas a GET, com excecao de `POST /oauth/token` para autenticacao. O modo desktop continua disponivel.
+
+**Guia completo de configuracao, tabelas e deploy:** [deploy/README.md](deploy/README.md).
+
+A imagem Docker usa `sales.nexusfibra.net.br` com o Traefik e o PostgreSQL existentes. A integracao e acionada manualmente por dia, com paginacao, limites e checkpoints. As credenciais ficam somente no backend e nao sao enviadas ao GitHub.
+
 ## Recursos atuais
 
 - Visão geral dos principais indicadores comerciais.
@@ -27,7 +35,7 @@ O sistema cruza planilhas de atendimentos e ordens de serviço, consolida regist
 
 ## Privacidade dos dados
 
-As planilhas são processadas no próprio navegador. Os registros importados ficam armazenados localmente no IndexedDB do dispositivo e não são incluídos no repositório Git.
+No modo desktop, os dados ficam no IndexedDB do dispositivo. No modo servidor, os relatórios selecionados são enviados à API autenticada e armazenados no PostgreSQL compartilhado. Planilhas, credenciais e backups não são incluídos no Git. Consulte o guia de deploy para as regras de acesso e consulta Hubsoft.
 
 ## Desenvolvimento
 
