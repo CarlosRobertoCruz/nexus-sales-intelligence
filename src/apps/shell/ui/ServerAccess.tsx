@@ -1,97 +1,195 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { salesApi } from "@/core/services/salesApi";
+import { LoginScreen } from "./auth/LoginScreen";
+import { SalesArrival } from "./auth/SalesArrival";
+import { SalesBrand } from "./auth/SalesBrand";
+import { SalesDashboardBoundary } from "./auth/SalesDashboardBoundary";
+import { SalesStartupContext } from "./auth/salesStartup";
 import "./serverAccess.css";
+import "./auth/salesAuth.css";
+
 type User = { name: string; email: string };
 export function ServerAccess({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null),
-    [loading, setLoading] = useState(true),
-    [error, setError] = useState("");
-  const [email, setEmail] = useState(""),
-    [password, setPassword] = useState(""),
-    [busy, setBusy] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [arriving, setArriving] = useState(false);
+  const [dashboardReady, setDashboardReady] = useState(false);
+  const [startupError, setStartupError] = useState("");
+  const [attempt, setAttempt] = useState(0);
+  const loginPending = useRef(false);
+  const startupPending = useRef(false);
+  const reloadNeeded = useRef(false);
+  const dashboardRegion = useRef<HTMLDivElement>(null);
+
+  const enter = useCallback((nextUser: User) => {
+    startupPending.current = true;
+    reloadNeeded.current = false;
+    setDashboardReady(false);
+    setStartupError("");
+    setError("");
+    setArriving(true);
+    setUser(nextUser);
+  }, []);
+  const reportReady = useCallback((loadError: string | null) => {
+    if (!startupPending.current) return;
+    setStartupError(loadError ?? "");
+    setDashboardReady(!loadError);
+  }, []);
+  const complete = useCallback(() => {
+    startupPending.current = false;
+    setArriving(false);
+    window.requestAnimationFrame(() => dashboardRegion.current?.focus());
+  }, []);
+  const reset = useCallback(() => {
+    startupPending.current = false;
+    setUser(null);
+    setArriving(false);
+    setPassword("");
+    setStartupError("");
+    setDashboardReady(false);
+  }, []);
   useEffect(() => {
     let active = true;
-    void salesApi<{ user: User }>("/session")
+    const controller = new AbortController();
+    void salesApi<{ user: User }>("/session", {
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+    })
       .then((d) => {
-        if (active) setUser(d.user);
+        if (active) enter(d.user);
       })
       .catch(() => {})
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setChecking(false);
       });
-    const expired = () => setUser(null);
-    window.addEventListener("sales-session-expired", expired);
+    window.addEventListener("sales-session-expired", reset);
     return () => {
       active = false;
-      window.removeEventListener("sales-session-expired", expired);
+      controller.abort();
+      window.removeEventListener("sales-session-expired", reset);
     };
-  }, []);
-  async function login(e: FormEvent) {
-    e.preventDefault();
-    if (busy) return;
+  }, [enter, reset]);
+  useEffect(() => {
+    if (!arriving) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = overflow;
+    };
+  }, [arriving]);
+  async function login(event: FormEvent) {
+    event.preventDefault();
+    if (loginPending.current) return;
+    loginPending.current = true;
     setBusy(true);
     setError("");
     try {
-      const d = await salesApi<{ user: User }>("/login", {
+      const result = await salesApi<{ user: User }>("/login", {
         method: "POST",
         body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(20000),
       });
-      setUser(d.user);
       setPassword("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível entrar.");
+      enter(result.user);
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : "Não foi possível entrar.",
+      );
     } finally {
+      loginPending.current = false;
       setBusy(false);
     }
   }
-  if (loading) return <main className="sales-access">Carregando…</main>;
-  if (!user)
+  async function logout() {
+    try {
+      await salesApi("/logout", { method: "POST", body: "{}" });
+      reset();
+    } catch (failure) {
+      setError(
+        failure instanceof Error ? failure.message : "Não foi possível sair.",
+      );
+    }
+  }
+  if (checking)
     return (
-      <main className="sales-access">
-        <form onSubmit={login} className="sales-login">
-          <h1>Nexus Sales Intelligence</h1>
-          <p>Entre para consultar a base comercial da equipe.</p>
-          <label>
-            E-mail
-            <input
-              type="email"
-              autoComplete="username"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <label>
-            Senha
-            <input
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </label>
-          {error && <p role="alert">{error}</p>}
-          <button disabled={busy}>{busy ? "Entrando…" : "Entrar"}</button>
-        </form>
+      <main className="sales-session-check" role="status">
+        <SalesBrand />
+        <span className="sales-auth-spinner" aria-hidden="true" />
+        <p>Preparando seu acesso…</p>
       </main>
     );
+  if (!user)
+    return (
+      <LoginScreen
+        email={email}
+        password={password}
+        onEmail={setEmail}
+        onPassword={setPassword}
+        busy={busy}
+        error={error}
+        onSubmit={login}
+      />
+    );
   return (
-    <>
-      <div className="sales-account">
-        <span>{user.name}</span>
-        <button
-          onClick={() => {
-            void salesApi("/logout", { method: "POST", body: "{}" })
-              .then(() => setUser(null))
-              .catch((e) => setError(e.message));
-          }}
+    <SalesStartupContext.Provider value={reportReady}>
+      <div
+        className="sales-workspace"
+        data-arriving={arriving}
+        inert={arriving}
+        aria-hidden={arriving}
+      >
+        <div className="sales-account">
+          <span>{user.name}</span>
+          <button onClick={() => void logout()}>Sair</button>
+          {error && <span role="alert">{error}</span>}
+        </div>
+        <div
+          key={attempt}
+          ref={dashboardRegion}
+          tabIndex={-1}
+          className="sales-dashboard-region"
+          aria-label="Painel comercial"
         >
-          Sair
-        </button>
-        {error && <span role="alert">{error}</span>}
+          <SalesDashboardBoundary
+            onFailure={() => {
+              reloadNeeded.current = true;
+              reportReady(
+                "Não foi possível carregar o painel. Tente novamente para atualizar a página.",
+              );
+            }}
+          >
+            {children}
+          </SalesDashboardBoundary>
+        </div>
       </div>
-      {children}
-    </>
+      {arriving && (
+        <SalesArrival
+          ready={dashboardReady}
+          error={startupError || error}
+          onComplete={complete}
+          onRetry={() => {
+            if (reloadNeeded.current) {
+              window.location.reload();
+              return;
+            }
+            setStartupError("");
+            setError("");
+            setDashboardReady(false);
+            setAttempt((value) => value + 1);
+          }}
+          onExit={() => void logout()}
+        />
+      )}
+    </SalesStartupContext.Provider>
   );
 }

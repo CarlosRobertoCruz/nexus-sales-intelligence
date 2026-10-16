@@ -281,3 +281,47 @@ Abra exatamente `http://127.0.0.1:5173` (a origem deve coincidir com APP_ORIGIN)
 ## Validacao desta entrega
 
 Frontend e classificador do backend compilados; 22 testes passaram, cobrindo API autenticada, PostgreSQL embarcado, importacao, deduplicacao, limites de consultas, checkpoints e respostas de rate limit. Lint sem erros, com 8 avisos preexistentes. Sintaxe YAML validada; a validacao semantica pelo Compose e o build das imagens tambem foram incluidos no workflow do GitHub. Docker nao esta instalado no computador de desenvolvimento, portanto build das imagens, redes externas, PostgreSQL real da VPS, TLS e compatibilidade dos retornos da sua Hubsoft precisam da verificacao controlada descrita acima.
+
+## Atualizacao visual: login e abertura Brasil -> Mangaratiba
+
+O login web segue o layout Nexus em duas colunas, com formulario responsivo e alternancia da visibilidade da senha. Depois de autenticar (ou restaurar uma sessao valida), a abertura usa uma malha SVG local do IBGE para aproximar do Brasil ate Mangaratiba. Nao consulta IBGE, tiles ou Hubsoft durante essa animacao.
+
+O codigo maior do painel e carregado separadamente, depois da autenticacao, durante a abertura. O painel continua montado e hidratando por tras da animacao, com interacao bloqueada ate terminar. A entrada dura cerca de 4 segundos quando os dados ja estao prontos; se precisarem de mais tempo, aguarda a carga real. `Pular animacao` pula apenas a parte visual, sem liberar um painel ainda carregando. Uma base vazia e um resultado valido. Falhas oferecem nova tentativa; falha ao baixar o codigo do painel permite recarregar a pagina. `prefers-reduced-motion` desativa o zoom e elimina a espera visual.
+
+As capturas de teste usam somente contas ficticias e uma base comercial simulada. Para verificar localmente o modo servidor, inclusive login, movimento reduzido e telas de 320/390px:
+
+```bash
+npm ci --ignore-scripts
+npm run test:auth
+```
+
+No Windows os testes usam o Edge instalado; Linux/macOS usam Chromium, que pode ser instalado com `npx playwright install chromium`. Os testes iniciam seu proprio Vite em `127.0.0.1:4173` e simulam todas as rotas da API. Nao precisam de banco ou credenciais Hubsoft. Os screenshots ficam em `test-results/`, ignorado pelo Git.
+
+Esta mudanca visual nao altera tabelas, senha minima, permissoes nem dados Hubsoft. Depois do push e merge, no terminal da VPS:
+
+```bash
+cd /home/lab/projetos/nexus-sales-intelligence
+git status --short
+git switch main
+git pull --ff-only origin main
+dc() { docker compose --env-file .env.vps -f compose.vps.yml "$@"; }
+dc config --quiet
+```
+
+Com a pasta de codigo sem alteracoes pendentes, aguarde cada comando terminar sem erro:
+
+```bash
+dc build web
+```
+
+```bash
+dc up -d --no-deps --no-build --wait web
+```
+
+```bash
+dc ps
+curl --fail http://127.0.0.1:8089/healthz
+curl --fail http://127.0.0.1:8089/api/ready
+```
+
+Use `APP_VERSION` que ja esta em uso no ambiente. Nao precisa executar migracoes, recriar usuarios ou reconstruir a API para esta atualizacao. Acesse a URL HTTPS e saia da sessao para visualizar o formulario novo. Uma janela InPrivate tambem permite verificar sem encerrar a sessao da janela atual.

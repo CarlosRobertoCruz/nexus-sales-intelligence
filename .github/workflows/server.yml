@@ -22,6 +22,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm ci --prefix server --ignore-scripts
       - run: npm run lint
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:auth
       - run: npm run test:server
       - run: npm run build
         env:

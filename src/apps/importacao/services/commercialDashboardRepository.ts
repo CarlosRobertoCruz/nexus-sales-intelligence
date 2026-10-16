@@ -229,7 +229,7 @@ async function writeCommercialData(
 
 export async function loadCommercialData(): Promise<PersistedCommercialData> {
   if (serverMode) {
-    const data = await salesApi<{ ledger: unknown }>("/data");
+    const data = await salesApi<{ ledger: unknown }>("/data", { signal: AbortSignal.timeout(20000) });
     return { ledger: hydrateSerializedLedger(data.ledger), dashboard: null };
   }
   const database = await openDatabase();
