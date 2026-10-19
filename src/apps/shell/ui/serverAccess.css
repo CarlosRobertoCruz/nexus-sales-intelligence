@@ -11,33 +11,12 @@
     14px Inter,
     sans-serif;
 }
-.sales-sync {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0;
-  font:
-    13px Inter,
-    sans-serif;
-  min-width: 0;
-}
-.sales-sync label {
-  display: grid;
-  gap: 6px;
-}
-.sales-sync p {
-  line-height: 1.5;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.sales-sync-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.sales-sync-actions button {
-  flex: 1 1 140px;
-}
-.sales-sync input {
-  width: 100%;
-  color-scheme: dark;
+.sales-account button {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid #3a3454;
+  border-radius: 8px;
+  color: #e5def7;
+  background: #171426;
+  cursor: pointer;
 }
