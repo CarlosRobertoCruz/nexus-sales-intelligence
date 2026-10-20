@@ -1,5 +1,12 @@
 // Navegação global do produto; os destinos ainda não construídos ficam sinalizados.
-export type AppPage = "overview" | "sales" | "renewals" | "cancellations" | "locations" | "team";
+export type AppPage =
+  | "overview"
+  | "sales"
+  | "renewals"
+  | "cancellations"
+  | "locations"
+  | "team"
+  | "users";
 
 export const APP_SHELL_COPY = {
   product: "Nexus Sales Intelligence",
@@ -11,5 +18,6 @@ export const APP_SHELL_COPY = {
     { id: "cancellations", label: "Cancelamentos", available: true },
     { id: "locations", label: "Localidades", available: true },
     { id: "team", label: "Equipe comercial", available: true },
+    { id: "users", label: "Usuários", available: true },
   ],
 } as const;

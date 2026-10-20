@@ -175,6 +175,131 @@ test("SQL schema, password hashing, authenticated imports and shared persisted m
   );
   const cookie = await login();
   await t.test(
+    "user management requires a session and rejects cross-origin account creation",
+    async () => {
+      assert.equal((await request("/users")).status, 401);
+      assert.equal(
+        (
+          await request("/users", "POST", {
+            name: "Outra pessoa",
+            email: "other@example.invalid",
+            password: "test-password-1234",
+          })
+        ).status,
+        401,
+      );
+      assert.equal(
+        (await request("/users", "POST", {}, cookie, "https://other.invalid"))
+          .status,
+        403,
+      );
+    },
+  );
+  await t.test(
+    "authenticated account creation normalizes email, stores only a hash and permits login",
+    async () => {
+      const result = await request(
+        "/users",
+        "POST",
+        {
+          name: "  Nova Pessoa  ",
+          email: " NOVA@EXAMPLE.INVALID ",
+          password: "new-test-password",
+          active: false,
+        },
+        cookie,
+      );
+      assert.equal(result.status, 201);
+      const data = await result.json();
+      assert.equal(data.user.email, "nova@example.invalid");
+      assert.equal(data.user.name, "Nova Pessoa");
+      assert.equal(data.user.active, true);
+      assert.equal("password_hash" in data.user, false);
+      assert.equal("password" in data.user, false);
+      const stored = (
+        await query("SELECT password_hash FROM users WHERE email=$1", [
+          "nova@example.invalid",
+        ])
+      ).rows[0];
+      assert.notEqual(stored.password_hash, "new-test-password");
+      assert.equal(
+        await verifyPassword("new-test-password", stored.password_hash),
+        true,
+      );
+      assert.equal(
+        (
+          await request("/login", "POST", {
+            email: "nova@example.invalid",
+            password: "new-test-password",
+          })
+        ).status,
+        200,
+      );
+    },
+  );
+  await t.test(
+    "duplicate emails and invalid account fields are rejected without creating extra users",
+    async () => {
+      const valid = {
+        name: "Nova Pessoa",
+        email: "nova@example.invalid",
+        password: "new-test-password",
+      };
+      const duplicate = await request(
+        "/users",
+        "POST",
+        { ...valid, email: "NOVA@EXAMPLE.INVALID" },
+        cookie,
+      );
+      assert.equal(duplicate.status, 409);
+      assert.equal((await duplicate.json()).error, "USUARIO_EMAIL_EXISTENTE");
+      for (const patch of [
+        { name: " " },
+        { name: "x".repeat(101) },
+        { email: "bad" },
+        { password: "short" },
+        { password: "x".repeat(257) },
+      ]) {
+        const response = await request(
+          "/users",
+          "POST",
+          { ...valid, email: "invalid@example.invalid", ...patch },
+          cookie,
+        );
+        assert.equal(response.status, 400);
+      }
+      assert.equal(
+        Number((await query("SELECT count(*) AS n FROM users")).rows[0].n),
+        2,
+      );
+    },
+  );
+  await t.test(
+    "paginated user list contains only public account fields",
+    async () => {
+      const response = await request("/users?page=1", "GET", null, cookie);
+      assert.equal(response.status, 200);
+      const data = await response.json();
+      assert.equal(data.total, 2);
+      assert.equal(data.pageSize, 20);
+      assert.equal(data.users.length, 2);
+      for (const user of data.users)
+        assert.deepEqual(
+          Object.keys(user).sort(),
+          ["id", "email", "name", "active", "created_at"].sort(),
+        );
+      assert.equal(
+        (await request("/users?page=0", "GET", null, cookie)).status,
+        400,
+      );
+      assert.equal(
+        (await request("/users?page=2", "GET", null, cookie)).status,
+        200,
+      );
+    },
+  );
+
+  await t.test(
     "repeat imports do not duplicate sales and another session sees the same base",
     async () => {
       for (let i = 0; i < 2; i++) {

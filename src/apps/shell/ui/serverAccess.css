@@ -20,3 +20,78 @@
   background: #171426;
   cursor: pointer;
 }
+
+.sales-account {
+  min-height: 62px;
+  padding: 10px 24px;
+  background: #131625;
+  border-bottom: 1px solid #2b2640;
+  gap: 20px;
+}
+.sales-account-profile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sales-account-avatar {
+  display: grid;
+  place-items: center;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  padding: 9px;
+  border: 1px solid #4a3a8c;
+  border-radius: 11px;
+  color: #b49bff;
+  background: #7c5cff15;
+}
+.sales-account-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.sales-account-identity strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+.sales-account-identity small {
+  font-size: 10px;
+  color: #a7a1bb;
+}
+.sales-account-identity > * {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sales-account .sales-account-exit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  font-size: 11px;
+}
+.sales-account-exit > span {
+  width: 14px;
+  height: 14px;
+  color: #bba6ef;
+}
+.sales-account-exit:hover {
+  background: #211b35;
+  border-color: #7c5cff;
+}
+.sales-account-error {
+  color: #ffb4c2;
+  font-size: 11px;
+}
+@media (max-width: 520px) {
+  .sales-account {
+    padding: 10px 16px;
+    gap: 12px;
+  }
+  .sales-account-identity > * {
+    max-width: calc(100vw - 170px);
+  }
+}
