@@ -1,5 +1,6 @@
 // Composição raiz das páginas disponíveis no painel.
 import { useContext, useEffect, useState } from "react";
+import { UsersPage } from "@/apps/usuarios/ui/UsersPage";
 import { CancellationsPage } from "@/apps/cancelamentos/ui/CancellationsPage";
 import { TeamPage } from "@/apps/equipeComercial/ui/TeamPage";
 import { useSpreadsheetImportController } from "@/apps/importacao/controller/useSpreadsheetImportController";
@@ -71,6 +72,7 @@ export default function DashboardApp() {
           periodSelector={periodSelector}
         />
       )}
+      {activePage === "users" && <UsersPage />}
       {activePage === "team" && (
         <TeamPage snapshot={dashboard?.team} periodSelector={periodSelector} />
       )}

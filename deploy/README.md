@@ -325,3 +325,25 @@ curl --fail http://127.0.0.1:8089/api/ready
 ```
 
 Use `APP_VERSION` que ja esta em uso no ambiente. Nao precisa executar migracoes, recriar usuarios ou reconstruir a API para esta atualizacao. Acesse a URL HTTPS e saia da sessao para visualizar o formulario novo. Uma janela InPrivate tambem permite verificar sem encerrar a sessao da janela atual.
+
+
+## Cadastro de usuários pelo painel
+
+No modo servidor, a aba **Usuários**, abaixo de **Equipe comercial**, lista os acessos existentes e permite criar uma conta com nome, e-mail e senha inicial de 12 a 256 caracteres. A pessoa pode entrar imediatamente com os dados cadastrados; não há envio de convite por e-mail. Todas as contas autenticadas podem criar usuários, seguindo o modelo atual de permissões iguais. Senhas são armazenadas com scrypt e nunca retornam na listagem. O script `server/user.mjs` continua disponível para criar a primeira conta.
+
+Esta atualização exige reconstruir **API e web**. As instruções anteriores de reconstruir somente web se aplicam à entrega visual anterior. Não há nova migração nem necessidade de recriar contas existentes. Depois do merge, na VPS, com `git status --short` sem alterações pendentes:
+
+```bash
+cd /home/lab/projetos/nexus-sales-intelligence
+git switch main
+git pull --ff-only origin main
+dc() { docker compose --env-file .env.vps -f compose.vps.yml "$@"; }
+dc config --quiet
+dc build api
+dc build web
+dc up -d --no-build --wait api web
+dc ps
+curl --fail http://127.0.0.1:8089/api/ready
+```
+
+Execute um comando por vez e aguarde concluir sem erro. Mantenha o `APP_VERSION` já usado na VPS. Após atualizar o navegador, entre em **Usuários → Novo usuário**. Os testes de cadastro usam PostgreSQL embarcado e API simulada no navegador, sem acessar Hubsoft ou a VPS.

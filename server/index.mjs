@@ -1,4 +1,5 @@
 import http from "node:http";
+import { createUser, listUsers } from "./users.mjs";
 import { pool, transaction } from "./db.mjs";
 import { passwordHash, verifyPassword, newToken, hashToken } from "./auth.mjs";
 import { importWorksheets, loadLedger } from "./records.mjs";
@@ -21,12 +22,12 @@ function send(res, status, data, headers = {}) {
   });
   res.end(JSON.stringify(data));
 }
-async function body(req) {
+async function body(req, maxBytes = 20 * 1024 * 1024) {
   let size = 0;
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 20 * 1024 * 1024) {
+    if (size > maxBytes) {
       const e = new Error("REQUISICAO_MUITO_GRANDE");
       e.status = 413;
       throw e;
@@ -58,7 +59,8 @@ async function session(req) {
 const dummyHash = await passwordHash(newToken());
 export const server = http.createServer(async (req, res) => {
   try {
-    const path = new URL(req.url, "http://localhost").pathname;
+    const requestUrl = new URL(req.url, "http://localhost");
+    const path = requestUrl.pathname;
     if (req.method === "GET" && path === "/api/healthz")
       return send(res, 200, { ok: true });
     if (req.method === "GET" && path === "/api/ready") {
@@ -131,6 +133,19 @@ export const server = http.createServer(async (req, res) => {
           hashToken(token),
         ]);
       return send(res, 200, { ok: true }, { "Set-Cookie": cookie("") });
+    }
+    // All authenticated accounts have the same permissions, as in the existing application.
+    if (req.method === "GET" && path === "/api/users") {
+      return send(
+        res,
+        200,
+        await listUsers(pool, requestUrl.searchParams.get("page") ?? "1"),
+      );
+    }
+    if (req.method === "POST" && path === "/api/users") {
+      return send(res, 201, {
+        user: await createUser(pool, await body(req, 16 * 1024)),
+      });
     }
     if (req.method === "GET" && path === "/api/data")
       return send(res, 200, {

@@ -13,6 +13,12 @@ export async function salesApi<T = unknown>(
     if (response.status === 401)
       window.dispatchEvent(new Event("sales-session-expired"));
     const messages: Record<string, string> = {
+      USUARIO_DADOS_INVALIDOS: "Confira os dados do novo usuário.",
+      USUARIO_NOME_INVALIDO: "Informe um nome com até 100 caracteres.",
+      USUARIO_EMAIL_INVALIDO: "Informe um e-mail válido.",
+      USUARIO_SENHA_INVALIDA: "A senha deve ter entre 12 e 256 caracteres.",
+      USUARIO_EMAIL_EXISTENTE: "Já existe um usuário com esse e-mail.",
+      USUARIOS_PAGINA_INVALIDA: "A página de usuários é inválida.",
       EMAIL_OU_SENHA_INVALIDOS: "E-mail ou senha inválidos.",
       SESSAO_NECESSARIA: "Entre novamente para continuar.",
       HUBSOFT_NAO_CONFIGURADA:

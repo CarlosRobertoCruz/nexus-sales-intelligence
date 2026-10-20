@@ -1,0 +1,402 @@
+.sales-users-page {
+  color: #f5f4fa;
+}
+.sales-users-page .page-header {
+  margin-bottom: 24px;
+}
+.sales-users-eyebrow {
+  color: #9b80ff;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 750;
+}
+.sales-users-page h1 {
+  font-size: clamp(26px, 3vw, 34px);
+  letter-spacing: -0.04em;
+  margin: 10px 0;
+}
+.sales-users-page .page-header p {
+  color: #aaa4bc;
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0;
+}
+.sales-users-primary,
+.sales-users-secondary {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font:
+    600 12px Inter,
+    sans-serif;
+  cursor: pointer;
+}
+.sales-users-primary {
+  background: #7c5cff;
+  color: #fff;
+  border: 1px solid #9479ff;
+}
+.sales-users-primary > svg {
+  width: 15px;
+  height: 15px;
+}
+.sales-users-primary:hover:not(:disabled) {
+  background: #8b6fff;
+}
+.sales-users-secondary {
+  color: #d1c5ee;
+  background: #1a1530;
+  border: 1px solid #4a3a8c;
+}
+.sales-users-primary:disabled,
+.sales-users-secondary:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sales-users-page button:focus-visible,
+.sales-user-dialog button:focus-visible {
+  outline: 2px solid #bda4ff;
+  outline-offset: 3px;
+}
+.sales-users-policy {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #b9b0ce;
+  background: #7c5cff0a;
+  border: 1px solid #4a3a8c66;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 22px;
+}
+.sales-users-policy > span {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  color: #ab8fff;
+}
+.sales-users-policy p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sales-users-panel {
+  background: #13111f;
+  border: 1px solid #2b2640;
+  border-radius: 14px;
+  overflow: hidden;
+}
+.sales-users-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px;
+}
+.sales-users-panel-header h2 {
+  font-size: 16px;
+  margin: 0 0 7px;
+}
+.sales-users-panel-header p {
+  color: #9690a9;
+  font-size: 11px;
+  margin: 0;
+}
+.sales-users-panel-icon {
+  width: 36px;
+  height: 36px;
+  padding: 10px;
+  background: #7c5cff14;
+  color: #aa8fff;
+  border-radius: 10px;
+}
+.sales-users-list {
+  list-style: none;
+  padding: 0 24px 12px;
+  margin: 0;
+}
+.sales-users-list li {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 18px 0;
+  border-top: 1px solid #2b2640;
+}
+.sales-users-avatar {
+  width: 38px;
+  height: 38px;
+  padding: 11px;
+  background: #211b3d;
+  color: #b6a1ee;
+  border-radius: 11px;
+}
+.sales-users-person {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.sales-users-person > div {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.sales-users-person strong {
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.sales-users-person > span {
+  font-size: 11px;
+  color: #a7a0b8;
+  overflow-wrap: anywhere;
+}
+.sales-users-you {
+  padding: 2px 6px;
+  border: 1px solid #4a3a8c;
+  border-radius: 5px;
+  color: #c6b5ff;
+  font-size: 9px;
+}
+.sales-users-state {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+.sales-users-active,
+.sales-users-inactive {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+.sales-users-active {
+  background: #38c9a315;
+  color: #8edcc4;
+}
+.sales-users-inactive {
+  background: #9b94aa15;
+  color: #c0b9ce;
+}
+.sales-users-state small {
+  font-size: 10px;
+  color: #918aa2;
+}
+.sales-users-loading,
+.sales-users-load-error {
+  padding: 0 24px 24px;
+  color: #b9b0ce;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sales-users-load-error p {
+  color: #ffb4c2;
+}
+.sales-users-success {
+  padding: 12px 16px;
+  color: #a0e4d0;
+  border: 1px solid #38c9a340;
+  border-radius: 10px;
+  background: #38c9a30a;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sales-users-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-top: 1px solid #2b2640;
+  color: #a7a0b8;
+  font-size: 11px;
+}
+.sales-user-dialog {
+  padding: 0;
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100svh - 48px);
+  margin: auto;
+  color: #f5f4fa;
+  background: #13111f;
+  border: 1px solid #4a3a8c;
+  border-radius: 16px;
+  box-shadow: 0 30px 100px #0008;
+  overflow: auto;
+}
+.sales-user-dialog::backdrop {
+  background: #03040ccc;
+  backdrop-filter: blur(4px);
+}
+.sales-user-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 22px 24px;
+  background: #6e49e8;
+}
+.sales-user-dialog-header h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.sales-user-dialog-header p {
+  margin: 0;
+  font-size: 11px;
+  color: #ede6ff;
+  line-height: 1.5;
+}
+.sales-user-dialog-close {
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  color: #fff;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.sales-user-dialog-close:disabled {
+  opacity: 0.5;
+}
+.sales-user-dialog-body {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+}
+.sales-users-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: #c0b9cf;
+  font-size: 12px;
+}
+.sales-users-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #3a3454;
+  border-radius: 8px;
+  background: #0d0b18;
+  color: #f5f4fa;
+  font:
+    12px Inter,
+    sans-serif;
+}
+.sales-users-field input::placeholder {
+  color: #777087;
+}
+.sales-users-field input:focus-visible {
+  outline: 2px solid #9479ff55;
+  outline-offset: 2px;
+  border-color: #9479ff;
+}
+.sales-users-field input:disabled {
+  opacity: 0.6;
+}
+.sales-users-password-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.sales-users-password {
+  display: flex;
+  min-width: 0;
+  border: 1px solid #3a3454;
+  border-radius: 8px;
+  background: #0d0b18;
+}
+.sales-users-password input {
+  border: 0;
+  background: none;
+}
+.sales-users-password:focus-within {
+  outline: 2px solid #9479ff55;
+  outline-offset: 2px;
+  border-color: #9479ff;
+}
+.sales-users-password input:focus-visible {
+  outline: 0;
+}
+.sales-users-password button {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  flex: 0 0 42px;
+  padding: 12px;
+  background: transparent;
+  border: 0;
+  color: #aa9abc;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.sales-users-form-note {
+  color: #a29ab4;
+  font-size: 11px;
+  line-height: 1.65;
+  margin: 0;
+}
+.sales-users-form-error {
+  background: #ef476f0d;
+  border: 1px solid #ef476f40;
+  border-radius: 8px;
+  color: #fecdd3;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 12px;
+  margin: 0;
+}
+.sales-user-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 24px;
+  border-top: 1px solid #2b2640;
+}
+@media (max-width: 620px) {
+  .sales-users-panel-header {
+    padding: 18px;
+  }
+  .sales-users-list {
+    padding-inline: 18px;
+  }
+  .sales-users-list li {
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .sales-users-avatar {
+    width: 34px;
+    height: 34px;
+    padding: 9px;
+  }
+  .sales-users-state {
+    grid-column: 2;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+  .sales-user-dialog-header,
+  .sales-user-dialog-body {
+    padding: 20px;
+  }
+  .sales-users-password-grid {
+    grid-template-columns: 1fr;
+  }
+  .sales-user-dialog-footer {
+    padding: 16px 20px;
+    flex-wrap: wrap;
+  }
+  .sales-user-dialog-footer > button {
+    flex: 1 1 auto;
+  }
+}

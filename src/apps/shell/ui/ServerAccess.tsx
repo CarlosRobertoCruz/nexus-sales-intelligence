@@ -6,6 +6,8 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import { UserIcon, LogOutIcon } from "@/garden/foundations/assets/icons/icons";
+import { SalesAccountContext } from "./auth/salesAccount";
 import { salesApi } from "@/core/services/salesApi";
 import { LoginScreen } from "./auth/LoginScreen";
 import { SalesArrival } from "./auth/SalesArrival";
@@ -141,55 +143,77 @@ export function ServerAccess({ children }: { children: ReactNode }) {
       />
     );
   return (
-    <SalesStartupContext.Provider value={reportReady}>
-      <div
-        className="sales-workspace"
-        data-arriving={arriving}
-        inert={arriving}
-        aria-hidden={arriving}
-      >
-        <div className="sales-account">
-          <span>{user.name}</span>
-          <button onClick={() => void logout()}>Sair</button>
-          {error && <span role="alert">{error}</span>}
-        </div>
+    <SalesAccountContext.Provider value={user}>
+      <SalesStartupContext.Provider value={reportReady}>
         <div
-          key={attempt}
-          ref={dashboardRegion}
-          tabIndex={-1}
-          className="sales-dashboard-region"
-          aria-label="Painel comercial"
+          className="sales-workspace"
+          data-arriving={arriving}
+          inert={arriving}
+          aria-hidden={arriving}
         >
-          <SalesDashboardBoundary
-            onFailure={() => {
-              reloadNeeded.current = true;
-              reportReady(
-                "Não foi possível carregar o painel. Tente novamente para atualizar a página.",
-              );
-            }}
+          <header className="sales-account" aria-label="Conta conectada">
+            <div className="sales-account-profile">
+              <span className="sales-account-avatar" aria-hidden="true">
+                <UserIcon />
+              </span>
+              <span className="sales-account-identity">
+                <strong>{user.name}</strong>
+                <small>{user.email}</small>
+              </span>
+            </div>
+            <button
+              onClick={() => void logout()}
+              className="sales-account-exit"
+            >
+              <span aria-hidden="true">
+                <LogOutIcon />
+              </span>
+              Sair
+            </button>
+            {error && (
+              <span className="sales-account-error" role="alert">
+                {error}
+              </span>
+            )}
+          </header>
+          <div
+            key={attempt}
+            ref={dashboardRegion}
+            tabIndex={-1}
+            className="sales-dashboard-region"
+            aria-label="Painel comercial"
           >
-            {children}
-          </SalesDashboardBoundary>
+            <SalesDashboardBoundary
+              onFailure={() => {
+                reloadNeeded.current = true;
+                reportReady(
+                  "Não foi possível carregar o painel. Tente novamente para atualizar a página.",
+                );
+              }}
+            >
+              {children}
+            </SalesDashboardBoundary>
+          </div>
         </div>
-      </div>
-      {arriving && (
-        <SalesArrival
-          ready={dashboardReady}
-          error={startupError || error}
-          onComplete={complete}
-          onRetry={() => {
-            if (reloadNeeded.current) {
-              window.location.reload();
-              return;
-            }
-            setStartupError("");
-            setError("");
-            setDashboardReady(false);
-            setAttempt((value) => value + 1);
-          }}
-          onExit={() => void logout()}
-        />
-      )}
-    </SalesStartupContext.Provider>
+        {arriving && (
+          <SalesArrival
+            ready={dashboardReady}
+            error={startupError || error}
+            onComplete={complete}
+            onRetry={() => {
+              if (reloadNeeded.current) {
+                window.location.reload();
+                return;
+              }
+              setStartupError("");
+              setError("");
+              setDashboardReady(false);
+              setAttempt((value) => value + 1);
+            }}
+            onExit={() => void logout()}
+          />
+        )}
+      </SalesStartupContext.Provider>
+    </SalesAccountContext.Provider>
   );
 }
