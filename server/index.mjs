@@ -1,3 +1,4 @@
+import { safeHubsoftDiagnostic } from "./hubsoftDiagnostics.mjs";
 import http from "node:http";
 import { createUser, listUsers } from "./users.mjs";
 import { pool, transaction } from "./db.mjs";
@@ -183,7 +184,8 @@ export const server = http.createServer(async (req, res) => {
     }
     return send(res, 404, { error: "ROTA_NAO_ENCONTRADA" });
   } catch (error) {
-    send(res, error.status ?? 400, { error: safeCode(error) });
+    const diagnostic = safeHubsoftDiagnostic(error);
+    send(res, error.status ?? 400, { error: safeCode(error), ...(diagnostic ? { diagnostic } : {}) });
   }
 });
 server.requestTimeout = 300000;

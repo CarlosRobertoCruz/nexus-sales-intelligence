@@ -347,3 +347,12 @@ curl --fail http://127.0.0.1:8089/api/ready
 ```
 
 Execute um comando por vez e aguarde concluir sem erro. Mantenha o `APP_VERSION` já usado na VPS. Após atualizar o navegador, entre em **Usuários → Novo usuário**. Os testes de cadastro usam PostgreSQL embarcado e API simulada no navegador, sem acessar Hubsoft ou a VPS.
+
+
+## Diagnóstico seguro de campos Hubsoft
+
+Falhas de mapeamento passam a retornar um diagnóstico autenticado com o tipo de registro e os nomes fixos dos campos obrigatórios ausentes/vazios ou com formato inválido. O painel mostra o diagnóstico abaixo de **Consultar / continuar**. Os nomes se referem aos campos normalizados do Sales; não são uma cópia das chaves recebidas da Hubsoft. Para `usuario_abertura`, a mensagem indica que o nome não foi resolvido por relação ou mapeamento local, sem revelar o ID.
+
+O diagnóstico não contém valores, protocolos, IDs, nomes de clientes, mensagens, credenciais, tokens nem o corpo da resposta Hubsoft. Não gera consultas adicionais, não grava a página inválida e não avança seu checkpoint. Páginas anteriores já concluídas permanecem salvas. O diagnóstico detalha o primeiro problema de mapeamento encontrado; dados de datas inválidos são reportados antes da validação dos demais campos. O histórico mantém somente o código de erro existente: o detalhe aparece na resposta da tentativa atual, sem persistência adicional.
+
+Para disponibilizar esta etapa, reconstrua API e web, sequencialmente, conforme o procedimento de atualização. Não há migração nova. Depois do deploy, faça uma consulta manual de um único dia autorizado e compartilhe apenas o texto do diagnóstico exibido. Sem reiniciar do início se houver checkpoint válido. Esta entrega prepara a identificação dos campos; ainda não altera o mapeamento nem valida dados reais da conta Hubsoft.

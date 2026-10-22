@@ -1,3 +1,4 @@
+import { hubsoftDiagnosticMessage } from "./hubsoftDiagnostic";
 export const serverMode = import.meta.env.VITE_DATA_MODE === "server";
 export async function salesApi<T = unknown>(
   path: string,
@@ -27,15 +28,20 @@ export async function salesApi<T = unknown>(
         "A Hubsoft não retornou todos os campos de atendimento. Confira as relações e o mapeamento do usuário de abertura no servidor.",
       HUBSOFT_OS_CAMPOS_INSUFICIENTES:
         "A Hubsoft não retornou todos os campos necessários da OS. Confira o mapeamento antes de continuar.",
+      HUBSOFT_DATA_NAO_RECONHECIDA:
+        "Um campo de data retornado pela Hubsoft não está no formato esperado.",
       HUBSOFT_LIMITE_AGUARDE:
         "A Hubsoft atingiu o limite de consultas. Aguarde antes de retomar.",
       SINCRONIZACAO_EM_ANDAMENTO:
         "Já existe uma importação em andamento. Aguarde.",
     };
-    throw new Error(
-      messages[data.error] ??
-        `Não foi possível concluir a operação (${data.error ?? response.status}).`,
-    );
+    const diagnostic = ["HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES", "HUBSOFT_OS_CAMPOS_INSUFICIENTES", "HUBSOFT_DATA_NAO_RECONHECIDA"].includes(data.error)
+      ? hubsoftDiagnosticMessage(data.diagnostic) : "";
+    throw new Error([
+      messages[data.error] ?? `Não foi possível concluir a operação (${data.error ?? response.status}).`,
+      diagnostic,
+    ].filter(Boolean).join(" "));
+
   }
   return data as T;
 }
