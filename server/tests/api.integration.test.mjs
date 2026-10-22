@@ -459,6 +459,14 @@ test("SQL schema, password hashing, authenticated imports and shared persisted m
       const before = await loadLedger({ query });
       try {
         await assert.rejects(syncDay("2026-10-13", id), /CAMPOS_INSUFICIENTES/);
+        const response = await request("/hubsoft/sync", "POST", { day: "2026-10-13" }, await login());
+        assert.equal(response.status, 400);
+        const payload = await response.json();
+        assert.deepEqual(payload, {
+          error: "HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES",
+          diagnostic: { kind: "attendance", missingFields: ["nome_razaosocial", "descricao_abertura", "usuario_abertura", "tipo_atendimento", "data_cadastro"], invalidFields: [] },
+        });
+
         assert.equal(
           Number(
             (

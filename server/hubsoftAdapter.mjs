@@ -1,4 +1,5 @@
 import { HubsoftError } from "./hubsoft.mjs";
+import { HubsoftMappingError, requireHubsoftFields } from "./hubsoftDiagnostics.mjs";
 function pick(row, ...paths) {
   for (const path of paths) {
     const val = path.split(".").reduce((o, k) => o?.[k], row);
@@ -16,6 +17,10 @@ export function apiDate(value) {
   );
   if (!m) throw new HubsoftError("HUBSOFT_DATA_NAO_RECONHECIDA");
   return `${m[3]}/${m[2]}/${m[1]} ${m[4] ?? "00"}:${m[5] ?? "00"}`;
+}
+function diagnosticDate(kind, field, value) {
+  try { return apiDate(value); }
+  catch { throw new HubsoftMappingError("HUBSOFT_DATA_NAO_RECONHECIDA", kind, [], [field]); }
 }
 export function normalizeHubsoft(kind, row, userNames = {}) {
   let clientCode = pick(
@@ -80,16 +85,11 @@ export function normalizeHubsoft(kind, row, userNames = {}) {
       "tipo_atendimento.nome",
       "tipo_atendimento",
     );
-    const date = apiDate(pick(row, "data_cadastro_br", "data_cadastro"));
-    if (
-      !/^\d+$/.test(protocol) ||
-      !customer ||
-      !description ||
-      !user ||
-      !type ||
-      !date
-    )
-      throw new HubsoftError("HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES");
+    const date = diagnosticDate(kind, "data_cadastro", pick(row, "data_cadastro_br", "data_cadastro"));
+    requireHubsoftFields("HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES", kind, {
+      protocolo: protocol, nome_razaosocial: customer, descricao_abertura: description,
+      usuario_abertura: user, tipo_atendimento: type, data_cadastro: date,
+    }, ["protocolo"]);
     return {
       protocolo: protocol,
       nome_razaosocial: customer,
@@ -112,16 +112,18 @@ export function normalizeHubsoft(kind, row, userNames = {}) {
     "tipo_ordem_servico",
   );
   const status = pick(row, "status.descricao", "status.nome", "status");
-  const date = apiDate(pick(row, "data_inicio_programado"));
-  if (!/^\d+$/.test(number) || !customer || !type || !status || !date)
-    throw new HubsoftError("HUBSOFT_OS_CAMPOS_INSUFICIENTES");
+  const date = diagnosticDate(kind, "data_inicio_programado", pick(row, "data_inicio_programado"));
+  requireHubsoftFields("HUBSOFT_OS_CAMPOS_INSUFICIENTES", kind, {
+    numero_ordem_servico: number, nome_razaosocial: customer, tipo_ordem_servico: type,
+    status, data_inicio_programado: date,
+  }, ["numero_ordem_servico"]);
   return {
     numero_ordem_servico: number,
     tipo_ordem_servico: type,
     status,
     data_inicio_programado: date,
-    data_inicio_executado: apiDate(pick(row, "data_inicio_executado")),
-    data_termino_executado: apiDate(pick(row, "data_termino_executado")),
+    data_inicio_executado: diagnosticDate(kind, "data_inicio_executado", pick(row, "data_inicio_executado")),
+    data_termino_executado: diagnosticDate(kind, "data_termino_executado", pick(row, "data_termino_executado")),
     codigo_cliente: clientCode,
     nome_razaosocial: customer,
     descricao_abertura: pick(row, "descricao_abertura"),
