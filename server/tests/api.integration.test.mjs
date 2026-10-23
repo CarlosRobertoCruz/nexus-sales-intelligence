@@ -484,6 +484,57 @@ test("SQL schema, password hashing, authenticated imports and shared persisted m
       }
     },
   );
+  await t.test("opener enrichment resumes a large page within four GETs and persists no partial records", async () => {
+    const { hubsoft, syncDay } = await import("../sync.mjs");
+    const originalPage = hubsoft.page, originalOpener = hubsoft.attendanceOpener, originalEnv = hubsoft.env;
+    hubsoft.env = { HUBSOFT_API_URL: "https://example.invalid", HUBSOFT_CLIENT_ID: "test", HUBSOFT_CLIENT_SECRET: "test", HUBSOFT_USERNAME: "test", HUBSOFT_PASSWORD: "test" };
+    const rows = Array.from({ length: 7 }, (_, i) => ({ protocolo: `2026101500000${i}`, id_usuario_abertura: 999,
+      data_cadastro: "2026-10-15 09:00:00", descricao_abertura: "Instalacao 600 Mega Combo Plus",
+      tipo_atendimento: "Instalacao", nome_razaosocial: "Cliente ficticio" }));
+    const lookups = [], calls = [];
+    hubsoft.page = async (stream) => {
+      calls.push("page");
+      rows.forEach((row) => { row.tempo_restante = `dinamico-${calls.length}`; });
+      return { records: stream === "attendance" ? rows : [], complete: true };
+    };
+    hubsoft.attendanceOpener = async (protocol) => { calls.push("detail"); lookups.push(protocol); return "Beatriz"; };
+    try {
+      const before = await loadLedger({ query });
+      const first = await syncDay("2026-10-15", id);
+      assert.equal(first.requests, 4);
+      assert.equal(first.pages, 0);
+      assert.equal(first.complete, false);
+      assert.equal(first.published, false);
+      assert.deepEqual(await loadLedger({ query }), before);
+      assert.equal(Number((await query("SELECT count(*) AS n FROM source_records WHERE id LIKE '20261015%'")).rows[0].n), 0);
+      assert.equal(Number((await query("SELECT count(*) AS n FROM sync_cursors WHERE day='2026-10-15'")).rows[0].n), 0);
+      // Alterar um registro invalida sua resolucao antiga, sem reutilizar o nome.
+      rows[0].id_usuario_abertura = 1000;
+      const second = await syncDay("2026-10-15", id);
+      assert.equal(second.requests, 4);
+      assert.equal(second.pages, 0);
+      assert.equal(second.complete, false);
+      let result;
+      for (let i = 0; i < 3; i++) {
+        const start = calls.length;
+        result = await syncDay("2026-10-15", id);
+        assert.ok(calls.length - start <= 4);
+        if (result.complete) break;
+      }
+      assert.equal(result.complete, true);
+      assert.equal(lookups.length, 8);
+      assert.equal(new Set(lookups).size, 7);
+      assert.equal(Number((await query("SELECT count(*) AS n FROM source_records WHERE id LIKE '20261015%'")).rows[0].n), 7);
+      assert.equal(Number((await query("SELECT count(*) AS n FROM application_settings WHERE key LIKE 'hubsoft_pending_openers:2026-10-15:%'")).rows[0].n), 0);
+      assert.equal((await query("SELECT payload->>'usuario_abertura' AS name FROM source_records WHERE id=$1", [rows[0].protocolo])).rows[0].name, "Beatriz");
+      // Reinicio explicito apaga tanto o cursor quanto nomes pendentes.
+      await syncDay("2026-10-15", id, true);
+      const previousLookups = lookups.length;
+      await syncDay("2026-10-15", id, true);
+      assert.equal(lookups.length - previousLookups, 3);
+      assert.deepEqual(lookups.slice(-3), rows.slice(0, 3).map((row) => row.protocolo));
+    } finally { hubsoft.page = originalPage; hubsoft.attendanceOpener = originalOpener; hubsoft.env = originalEnv; }
+  });
   await t.test(
     "removing the last required upstream records clears stale metrics",
     async () => {

@@ -202,3 +202,35 @@ test("gateway HTML rate-limit responses still respect Retry-After", async () => 
  await assert.rejects(client.page("attendance","2026-10-10",0),/LIMITE/);
  assert.equal(calls.length,2);
 });
+
+
+test("documented opener lookup uses exact protocol, one result, shared OAuth and approved GET", async () => {
+  const { client, calls, waits } = mock([token, page(), { atendimentos: [{ protocolo: "123", usuario_abertura: " Beatriz " }] }]);
+  await client.page("attendance", "2026-10-10", 0);
+  assert.equal(await client.attendanceOpener("123"), "Beatriz");
+  assert.equal(calls.length, 3);
+  const c = calls[2];
+  assert.equal(c.method, "GET");
+  assert.equal(c.redirect, "error");
+  assert.equal(c.url.pathname, "/api/v1/integracao/cliente/atendimento");
+  assert.equal(c.url.searchParams.get("busca"), "protocolo");
+  assert.equal(c.url.searchParams.get("termo_busca"), "123");
+  assert.equal(c.url.searchParams.get("limit"), "1");
+  assert.equal(c.url.searchParams.get("apenas_pendente"), "nao");
+  assert.equal(c.body, undefined);
+  assert.ok(waits[2] > 0);
+});
+
+test("opener lookup rejects mismatch, multiple results and missing name without substituting responsible user", async () => {
+  for (const atendimentos of [[], [{ protocolo: "999", usuario_abertura: "Outro" }],
+    [{ protocolo: "123", usuario_abertura: "Teste" }, { protocolo: "123", usuario_abertura: "Outro" }],
+    [{ protocolo: "123", usuario_responsavel: "Nao utilizar" }]]) {
+    const { client } = mock([token, { atendimentos }]);
+    await assert.rejects(client.attendanceOpener("123"), /HUBSOFT_(CONSULTA_PROTOCOLO_DIVERGENTE|USUARIO_ABERTURA_NAO_RETORNADO)/);
+  }
+  const { client, calls } = mock([]);
+  for (const protocol of ["", "x", "123&busca=cpf", 123, "1".repeat(41)])
+    await assert.rejects(client.attendanceOpener(protocol), /PROTOCOLO_INVALIDO/);
+  await assert.rejects(client.request("POST", "/api/v1/integracao/cliente/atendimento", {}), /BLOQUEADO/);
+  assert.equal(calls.length, 0);
+});

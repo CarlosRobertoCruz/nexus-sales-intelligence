@@ -10,7 +10,8 @@ test("diagnostic formatter ignores arbitrary values and unknown fields", () => {
   expect(hubsoftDiagnosticMessage(null)).toBe("");
 });
 
-test("sync panel displays safe missing-field diagnostic without extra queries", async ({ page }) => {
+test("sync panel displays safe missing-field diagnostic without extra queries", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   let syncCalls = 0;
   const ledger = { version: 1, attendance: [], serviceOrders: [], sales: [], renewals: [], cancellations: [], reactivations: [] };
@@ -37,4 +38,17 @@ test("sync panel displays safe missing-field diagnostic without extra queries", 
   await expect(panel.getByRole("status")).toContainText("ponto de retomada foi preservado");
   await expect(page.getByRole("button", { name: "Consultar / continuar" })).toBeEnabled();
   expect(syncCalls).toBe(1);
+  // Mensagem longa + menu completo: a lateral deve permitir chegar ao fim.
+  const sidebar = page.locator(".app-sidebar");
+  await page.evaluate(() => window.scrollTo(0, 300));
+  await sidebar.hover({ position: { x: 100, y: 250 } });
+  await page.mouse.wheel(0, 2500);
+  await expect.poll(() => sidebar.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  const imports = page.getByRole("button", { name: "Importar planilhas" });
+  await expect(imports).toBeInViewport();
+  const feedback = panel.getByRole("status");
+  await expect(feedback).toBeInViewport();
+  await expect.poll(() => imports.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(720);
+  await page.screenshot({ path: info.outputPath("sidebar-diagnostic-scroll.png") });
+
 });

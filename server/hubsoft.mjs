@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 const READ_PATHS = new Set([
   "/api/v1/integracao/atendimento/todos",
+  "/api/v1/integracao/cliente/atendimento",
   "/api/v1/integracao/ordem_servico/todos",
 ]);
 export class HubsoftError extends Error {
@@ -54,7 +55,12 @@ export class HubsoftClient {
     )
       throw new HubsoftError("URL_HUBSOFT_INVALIDA");
     const url = new URL(path, base);
-    if (method === "GET") {
+    if (method === "GET" && path === "/api/v1/integracao/cliente/atendimento") {
+      if (typeof body.protocol !== "string" || !/^\d{1,40}$/.test(body.protocol))
+        throw new HubsoftError("PROTOCOLO_INVALIDO");
+      url.search = new URLSearchParams({ busca: "protocolo", termo_busca: body.protocol,
+        limit: "1", apenas_pendente: "nao", order_by: "data_cadastro", order_type: "asc" }).toString();
+    } else if (method === "GET") {
       validateDay(body.day);
       if (!Number.isInteger(body.page) || body.page < 0)
         throw new HubsoftError("PAGINA_INVALIDA");
@@ -126,6 +132,50 @@ export class HubsoftClient {
       throw new HubsoftError("HUBSOFT_CONSULTA_RECUSADA");
     return data;
   }
+  async authenticate() {
+    if (!this.configured) throw new HubsoftError("HUBSOFT_NAO_CONFIGURADA");
+    if (!this.token || Date.now() >= this.expires) {
+      const d = await this.request("POST", "/oauth/token", {
+        grant_type: "password",
+        client_id: this.env.HUBSOFT_CLIENT_ID,
+        client_secret: this.env.HUBSOFT_CLIENT_SECRET,
+        username: this.env.HUBSOFT_USERNAME,
+        password: this.env.HUBSOFT_PASSWORD,
+      });
+      if (
+        typeof d.access_token !== "string" ||
+        !Number.isFinite(Number(d.expires_in)) ||
+        Number(d.expires_in) <= 0
+      )
+        throw new HubsoftError("HUBSOFT_TOKEN_INVALIDO");
+      this.token = d.access_token;
+      this.expires =
+        Date.now() + Math.max(0, Number(d.expires_in) * 1000 - 30000);
+    }
+  }
+  attendanceOpener(protocol) {
+    const task = this.queue.then(async () => {
+      if (typeof protocol !== "string" || !/^\d{1,40}$/.test(protocol))
+        throw new HubsoftError("PROTOCOLO_INVALIDO");
+      await this.authenticate();
+      let data;
+      try {
+        data = await this.request("GET", "/api/v1/integracao/cliente/atendimento", { protocol }, this.token);
+      } catch (error) {
+        if (error.code === "HUBSOFT_AUTENTICACAO") { this.token = null; this.expires = 0; }
+        throw error;
+      }
+      if (!Array.isArray(data.atendimentos) || data.atendimentos.length !== 1 ||
+          String(data.atendimentos[0]?.protocolo) !== protocol)
+        throw new HubsoftError("HUBSOFT_CONSULTA_PROTOCOLO_DIVERGENTE");
+      const name = data.atendimentos[0].usuario_abertura;
+      if (typeof name !== "string" || !name.trim() || name.trim().length > 150)
+        throw new HubsoftError("HUBSOFT_USUARIO_ABERTURA_NAO_RETORNADO");
+      return name.trim();
+    });
+    this.queue = task.catch(() => {});
+    return task;
+  }
   page(stream, day, page) {
     const task = this.queue.then(async () => {
       validateDay(day);
@@ -141,24 +191,7 @@ export class HubsoftClient {
       if (!Number.isInteger(page) || page < 0)
         throw new HubsoftError("PAGINA_INVALIDA");
       if (!this.configured) throw new HubsoftError("HUBSOFT_NAO_CONFIGURADA");
-      if (!this.token || Date.now() >= this.expires) {
-        const d = await this.request("POST", "/oauth/token", {
-          grant_type: "password",
-          client_id: this.env.HUBSOFT_CLIENT_ID,
-          client_secret: this.env.HUBSOFT_CLIENT_SECRET,
-          username: this.env.HUBSOFT_USERNAME,
-          password: this.env.HUBSOFT_PASSWORD,
-        });
-        if (
-          typeof d.access_token !== "string" ||
-          !Number.isFinite(Number(d.expires_in)) ||
-          Number(d.expires_in) <= 0
-        )
-          throw new HubsoftError("HUBSOFT_TOKEN_INVALIDO");
-        this.token = d.access_token;
-        this.expires =
-          Date.now() + Math.max(0, Number(d.expires_in) * 1000 - 30000);
-      }
+      await this.authenticate();
       const streams = {
         attendanceChanges: {
           path: "/api/v1/integracao/atendimento/todos",

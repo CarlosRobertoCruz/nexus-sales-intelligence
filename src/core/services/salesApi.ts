@@ -30,6 +30,10 @@ export async function salesApi<T = unknown>(
         "A Hubsoft não retornou todos os campos necessários da OS. Confira o mapeamento antes de continuar.",
       HUBSOFT_DATA_NAO_RECONHECIDA:
         "Um campo de data retornado pela Hubsoft não está no formato esperado.",
+      HUBSOFT_USUARIO_ABERTURA_NAO_RETORNADO:
+        "A consulta por protocolo também não retornou o nome de abertura. Confira as permissões dessa consulta na Hubsoft.",
+      HUBSOFT_CONSULTA_PROTOCOLO_DIVERGENTE:
+        "A Hubsoft não retornou um único atendimento correspondente ao protocolo consultado. A importação foi interrompida sem atribuir um nome incorreto.",
       HUBSOFT_LIMITE_AGUARDE:
         "A Hubsoft atingiu o limite de consultas. Aguarde antes de retomar.",
       SINCRONIZACAO_EM_ANDAMENTO:

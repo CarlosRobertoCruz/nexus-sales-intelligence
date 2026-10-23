@@ -69,6 +69,7 @@ export function HubsoftSyncControl({
         pages: number;
         records: number;
         published: boolean;
+        requests?: number;
       }>("/hubsoft/sync", {
         method: "POST",
         body: JSON.stringify({ day, restart }),
@@ -76,7 +77,7 @@ export function HubsoftSyncControl({
       setRestart(false);
       if (result.published) await onUpdated();
       setMessage(
-        `${result.records} registros consultados em ${result.pages} páginas. ${result.complete ? (result.published ? "Dia concluído e painel atualizado." : "Dia concluído. Ainda faltam atendimentos ou OS na base para calcular os indicadores.") : "Consulta pausada no limite seguro. Clique em consultar para retomar do checkpoint."}`,
+        `${result.records} registros processados em ${result.pages} páginas${result.requests !== undefined ? `, com ${result.requests} consultas` : ""}. ${result.complete ? (result.published ? "Dia concluído e painel atualizado." : "Dia concluído. Ainda faltam atendimentos ou OS na base para calcular os indicadores.") : "Consulta pausada no limite seguro. Os nomes já resolvidos foram preservados. Clique em consultar para continuar."}`,
       );
     } catch (error) {
       setFailed(true);
@@ -116,8 +117,8 @@ export function HubsoftSyncControl({
         <span>Consultar novamente do início</span>
       </label>
       <p className="sales-sync-limits">
-        Até 4 páginas por execução, com 50 registros por página. Consulta de um
-        dia por vez.
+        Até 4 consultas por execução, incluindo a busca do nome de abertura.
+        Até 50 registros por página, de um dia por vez.
       </p>
       <Button
         variant="soft"
