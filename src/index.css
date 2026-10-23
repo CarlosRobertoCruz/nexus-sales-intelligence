@@ -4,7 +4,7 @@ html { min-width: 320px; background: #0D0B18; font-family: "Inter", system-ui, -
 body { margin: 0; min-width: 320px; min-height: 100vh; font-family: inherit; }
 button, input, select, textarea { font: inherit; }
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(228px, 264px) minmax(0, 1fr); }
-.app-sidebar { position: sticky; top: 0; height: 100vh; padding: 24px 18px; }
+.app-sidebar { position: sticky; top: 0; align-self: start; height: 100vh; height: 100dvh; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; scrollbar-color: #51466b #0D0B18; padding: 24px 18px; }
 .app-main { min-width: 0; width: 100%; max-width: 1600px; margin: 0 auto; padding: 32px; }
 .page-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
@@ -74,7 +74,7 @@ button, input, select, textarea { font: inherit; }
 @media (max-width: 1180px) { .cancellations-insight-grid { grid-template-columns: 1fr; } }
 @media (max-width: 1180px) { .location-map-layout { grid-template-columns: 1fr; } }
 @media (max-width: 1180px) { .team-insight-grid { grid-template-columns: 1fr; } }
-@media (max-width: 780px) { .app-shell { grid-template-columns: minmax(0, 1fr); } .app-sidebar { position: static; min-width: 0; height: auto; padding: 18px; } .app-sidebar > div { min-width: 0; max-width: 100%; } .app-sidebar nav { min-width: 0; max-width: 100%; overflow-x: auto; } .app-sidebar nav > div { flex-direction: row !important; min-width: max-content; } .app-sidebar nav button > div { min-width: 150px; } .app-sidebar > div > div:last-child { display: none; } .app-main { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .plan-table { overflow-x: auto; } .plan-table-head, .plan-table-row { min-width: 650px; } }
+@media (max-width: 780px) { .app-shell { grid-template-columns: minmax(0, 1fr); } .app-sidebar { position: static; min-width: 0; height: auto; overflow: visible; overscroll-behavior-y: auto; padding: 18px; } .app-sidebar > div { min-width: 0; max-width: 100%; } .app-sidebar nav { min-width: 0; max-width: 100%; overflow-x: auto; } .app-sidebar nav > div { flex-direction: row !important; min-width: max-content; } .app-sidebar nav button > div { min-width: 150px; } .app-sidebar > div > div:last-child { display: none; } .app-main { padding: 20px 16px 32px; } .page-header { align-items: flex-start; flex-direction: column; } .plan-table { overflow-x: auto; } .plan-table-head, .plan-table-row { min-width: 650px; } }
 @media (max-width: 780px) { .plan-comparison-row { grid-template-columns: 1fr; } }
 @media (max-width: 780px) { .team-performance-row { grid-template-columns: 1fr; } }
 @media (max-width: 620px) { .benefits-content { grid-template-columns: 1fr; justify-items: center; } .benefits-content > div:last-child { width: 100%; } }

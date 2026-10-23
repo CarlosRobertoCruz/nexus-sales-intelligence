@@ -27,6 +27,6 @@ Estas regras se aplicam a todo o projeto e a qualquer implementacao, teste ou ex
 
 ## Pontos de implementacao
 - server/hubsoft.mjs centraliza a lista de metodos e rotas permitidos e bloqueia redirecionamentos.
-- server/sync.mjs limita cada execucao a 4 paginas GET de um unico dia e persiste checkpoints no PostgreSQL.
+- server/sync.mjs limita cada execucao a 4 chamadas GET no total de um unico dia, incluindo consultas complementares por protocolo, e persiste checkpoints no PostgreSQL. A resolucao de nomes de uma pagina pendente fica no banco local para retomada; a pagina so avanca quando todos os registros forem validos.
 - Testes em server/tests usam respostas simuladas e PostgreSQL embarcado. Nunca substituir os mocks por chamadas reais sem uma tarefa explicitamente autorizada.
 - deploy/README.md documenta configuracao, mapeamento de usuarios Hubsoft, migracoes e deploy. Credenciais nao devem aparecer em saidas de revisao.

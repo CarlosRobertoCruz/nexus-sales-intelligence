@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pool } from "./db.mjs";
 import { HubsoftClient, validateDay } from "./hubsoft.mjs";
 import { normalizeHubsoft } from "./hubsoftAdapter.mjs";
@@ -17,6 +17,7 @@ export async function syncDay(day, userId, restart = false) {
   let locked = false;
   let pages = 0,
     records = 0;
+  let requests = 0;
   try {
     locked = (await db.query("SELECT pg_try_advisory_lock(73190602) AS locked"))
       .rows[0].locked;
@@ -26,26 +27,58 @@ export async function syncDay(day, userId, restart = false) {
       "INSERT INTO sync_runs(id,day,user_id,status) VALUES($1,$2,$3,$4)",
       [id, day, userId, "running"],
     );
-    if (restart) await db.query("DELETE FROM sync_cursors WHERE day=$1", [day]);
+    if (restart) {
+      await db.query("DELETE FROM sync_cursors WHERE day=$1", [day]);
+      await db.query("DELETE FROM application_settings WHERE key LIKE $1", [`hubsoft_pending_openers:${day}:%`]);
+    }
     const userNames =
       (
         await db.query(
           "SELECT value FROM application_settings WHERE key='hubsoft_user_names'",
         )
       ).rows[0]?.value ?? {};
-    for (const [stream, kind] of STREAMS) {
+    streams: for (const [stream, kind] of STREAMS) {
       let cursor = (
         await db.query(
           "SELECT page,complete FROM sync_cursors WHERE day=$1 AND stream=$2",
           [day, stream],
         )
       ).rows[0] ?? { page: 0, complete: false };
-      while (!cursor.complete && pages < 4) {
+      while (!cursor.complete && requests < 4) {
+        requests++;
         const result = await hubsoft.page(stream, day, cursor.page);
-        // Missing fields stop the page before advancing its durable checkpoint.
-        const rows = result.records
-          .filter((r) => !r.deleted_at)
-          .map((r) => normalizeHubsoft(kind, r, userNames));
+        const cacheKey = `hubsoft_pending_openers:${day}:${stream}`;
+        const saved = kind === "attendance"
+          ? (await db.query("SELECT value FROM application_settings WHERE key=$1", [cacheKey])).rows[0]?.value
+          : null;
+        const cache = saved?.page === cursor.page ? saved : { page: cursor.page, names: {} };
+        const rows = [];
+        for (const record of result.records.filter((r) => !r.deleted_at)) {
+          try { rows.push(normalizeHubsoft(kind, record, userNames)); }
+          catch (error) {
+            const d = error.diagnostic;
+            if (kind !== "attendance" || d?.missingFields?.length !== 1 ||
+                d.missingFields[0] !== "usuario_abertura" || d.invalidFields.length) throw error;
+            // A consulta complementar e unica por protocolo, sem reutilizar o responsavel atual.
+            const protocol = String(record.protocolo);
+            // Nao usar campos dinamicos como tempo_restante: mudam sem alterar a autoria.
+            const fingerprint = createHash("sha256").update(JSON.stringify({
+              protocol, openerId: record.id_usuario_abertura ?? null,
+              changedAt: record.data_ultima_alteracao ?? record.updated_at ?? null,
+            })).digest("hex");
+            let name = cache.names[protocol]?.fingerprint === fingerprint ? cache.names[protocol].name : null;
+            if (!name) {
+              if (requests >= 4) break streams;
+              requests++;
+              name = await hubsoft.attendanceOpener(protocol);
+              cache.names[protocol] = { fingerprint, name };
+              // Persistir somente a resolucao pendente; nao publicar nem avancar a pagina.
+              await db.query(`INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)
+                ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [cacheKey, JSON.stringify(cache)]);
+            }
+            rows.push(normalizeHubsoft(kind, { ...record, usuario_abertura: name }, {}));
+          }
+        }
         await db.query("BEGIN");
         try {
           await upsertRows(db, kind, rows, "hubsoft");
@@ -64,6 +97,7 @@ export async function syncDay(day, userId, restart = false) {
       ON CONFLICT(day,stream) DO UPDATE SET page=excluded.page,complete=excluded.complete,updated_at=now()`,
             [day, stream, cursor.page + 1, result.complete],
           );
+          await db.query("DELETE FROM application_settings WHERE key=$1", [cacheKey]);
           await db.query("COMMIT");
         } catch (e) {
           await db.query("ROLLBACK");
@@ -98,7 +132,7 @@ export async function syncDay(day, userId, restart = false) {
       "UPDATE sync_runs SET status=$2,pages=$3,records=$4,finished_at=now() WHERE id=$1",
       [id, complete ? "complete" : "paused", pages, records],
     );
-    return { day, pages, records, complete, ...publication };
+    return { day, pages, records, requests, complete, ...publication };
   } catch (error) {
     if (locked)
       await db.query(
