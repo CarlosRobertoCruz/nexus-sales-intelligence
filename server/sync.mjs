@@ -3,7 +3,8 @@ import { pool } from "./db.mjs";
 import { HubsoftClient, validateDay } from "./hubsoft.mjs";
 import { normalizeHubsoft } from "./hubsoftAdapter.mjs";
 import { upsertRows, rebuild } from "./records.mjs";
-export const hubsoft = new HubsoftClient();
+import { HubsoftGate } from "./hubsoftGate.mjs";
+export const hubsoft = new HubsoftClient(process.env, fetch, undefined, new HubsoftGate(pool, process.env));
 const STREAMS = [
   ["attendance", "attendance"],
   ["attendanceChanges", "attendance"],
@@ -84,9 +85,8 @@ export async function syncDay(day, userId, restart = false) {
           await upsertRows(db, kind, rows, "hubsoft");
           // Soft-deleted upstream records must no longer contribute to metrics.
           for (const deleted of result.records.filter((r) => r.deleted_at)) {
-            const key = String(
-              kind === "attendance" ? deleted.protocolo : deleted.numero,
-            );
+            const upstream=kind==="attendance"?deleted.id_atendimento:deleted.id_ordem_servico;
+            const key=upstream!=null?"hubsoft:"+String(upstream):String(kind==="attendance"?deleted.protocolo:deleted.numero);
             await db.query(
               "DELETE FROM source_records WHERE kind=$1 AND id=$2",
               [kind, key],

@@ -1,0 +1,20 @@
+{
+  "year": 2026,
+  "phase": "day",
+  "peakDay": "SUBSTITUA_PELO_DIA_DE_PICO",
+  "cutoff": "SUBSTITUA_PELO_ULTIMO_DIA_COMPLETO",
+  "osDateField": "data_inicio_programado",
+  "maxCalls": 500,
+  "reports": {
+    "attendance": {
+      "fileSha256": "SUBSTITUA_PELO_SHA256_DO_RELATORIO",
+      "exportedAt": "SUBSTITUA_PELO_INSTANTE_DA_EXPORTACAO",
+      "filters": {"dateField": "data_cadastro", "otherFilters": "none"}
+    },
+    "serviceOrders": {
+      "fileSha256": "SUBSTITUA_PELO_SHA256_DO_RELATORIO",
+      "exportedAt": "SUBSTITUA_PELO_INSTANTE_DA_EXPORTACAO",
+      "filters": {"dateField": "data_inicio_programado", "otherFilters": "none"}
+    }
+  }
+}

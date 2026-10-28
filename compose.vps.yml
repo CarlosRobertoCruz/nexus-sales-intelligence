@@ -37,6 +37,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+  history:
+    <<: *api
+    profiles: [tools]
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    entrypoint: [node, server/jobs/import-year.mjs]
+    command: [help]
   migrate:
     <<: *api
     profiles: [tools]
