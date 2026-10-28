@@ -1,0 +1,142 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {PGlite} from '@electric-sql/pglite';
+process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
+process.env.TZ='America/Sao_Paulo';
+const {pool}=await import('../db.mjs');
+const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth}=await import('../history.mjs');
+const {followupReport,orderDate,followupOrder}=await import('../historyFollowup.mjs');
+const {validateManifest}=await import('../historyPolicy.mjs');
+const {rebuild}=await import('../records.mjs');
+
+const report=(hash,dateField)=>({fileSha256:hash.repeat(64),exportedAt:'2026-10-28T10:00:00Z',filters:{dateField,otherFilters:'none'}});
+const manifest={year:2026,phase:'day',peakDay:'2026-10-15',cutoff:'2026-10-15',followupCutoff:'2026-10-27',osDateField:'data_termino_executado',maxCalls:500,
+  reports:{attendance:report('a','data_cadastro'),serviceOrders:report('b','data_termino_executado'),
+    followup:{...report('c','data_cadastro'),filters:{dateField:'data_cadastro',otherFilters:'none',relationship:'id_atendimento',followupCutoff:'2026-10-27'}}}};
+const attendance={id_atendimento:101,protocolo:'202610150001',codigo_cliente:12,cliente:{codigo_cliente:12,nome_razaosocial:'Cliente de teste'},
+  descricao_abertura:'Instalacao',data_cadastro:'15/10/2026',usuario_abertura:'Beatriz',tipo_atendimento:'Instalacao',status:'Finalizado',ordem_servico_count:6};
+const otherAttendance={...attendance,id_atendimento:102,protocolo:'202610150002',usuario_abertura:'Carlos',ordem_servico_count:0};
+const os={id_ordem_servico:201,id_atendimento:101,numero_ordem_servico:'201',cliente:attendance.cliente,tipo:'INSTALACAO',status:'finalizado',
+  data_cadastro:'15/10/2026 08:00:00',data_inicio_programado:'15/10/2026 09:00:00',data_inicio_executado:'20/10/2026 09:00:00',data_termino_executado:'20/10/2026 10:00:00'};
+const pending={...os,id_ordem_servico:202,numero_ordem_servico:'202',status:'Pendente',data_inicio_programado:null,data_inicio_executado:null,data_termino_executado:null};
+const cancelled={...pending,id_ordem_servico:203,numero_ordem_servico:'203',status:'Cancelado'};
+const sameDay={...os,id_ordem_servico:204,numero_ordem_servico:'204',data_inicio_programado:'14/10/2026 09:00:00',data_inicio_executado:'15/10/2026 09:00:00',data_termino_executado:'15/10/2026 10:00:00'};
+const earlierAttendance={...os,id_ordem_servico:205,numero_ordem_servico:'205',id_atendimento:103,data_inicio_executado:'15/10/2026 21:00:00',data_termino_executado:'2026-10-16T01:30:00Z'};
+const orphan={...sameDay,id_ordem_servico:206,numero_ordem_servico:'206',id_atendimento:null,atendimento:null};
+const nextMonth={...pending,id_ordem_servico:207,numero_ordem_servico:'207',data_inicio_programado:'02/11/2026 09:00:00'};
+const createdAfterCutoff={...pending,id_ordem_servico:208,numero_ordem_servico:'208',data_cadastro:'28/10/2026 08:00:00'};
+const evidence={month:'2026-10',reviewer:'Operador Teste',confirmFilters:true,attendance:{reportSha256:'a'.repeat(64),ids:['101','102']},
+  serviceOrders:{reportSha256:'b'.repeat(64),ids:['204','205','206']},followup:{reportSha256:'c'.repeat(64),ids:['201','202','203','204','207']}};
+
+async function fixture(run) {
+  const pg=new PGlite();
+  try {
+    for(const name of ['001_initial.sql','002_history.sql','003_attendance_followups.sql']) await pg.exec(await readFile(new URL('../../database/migrations/'+name,import.meta.url),'utf8'));
+    const query=(sql,params=[])=>sql.includes('advisory')?Promise.resolve({rows:[{locked:true}]}):pg.query(sql,params);
+    const adapter={query,connect:async()=>({query,release(){}})};
+    pool.query=query;pool.connect=adapter.connect;
+    await run(adapter);
+  } finally {await pg.close();}
+}
+function fakeClient({incomplete=false,wrongParent=false}={}) {
+  const calls=[];
+  return {calls,page:async(stream,day,page,dateField)=>{
+    calls.push({stream,day,page,dateField});
+    return {records:stream==='attendance'?[attendance,otherAttendance,{...attendance,id_atendimento:103,data_cadastro:'14/10/2026'}]:stream==='attendanceChanges'?[attendance]:[sameDay,earlierAttendance,orphan,os],complete:true};
+  },clientAttendances:async(code,day)=>{
+    calls.push({customer:code,day});
+    return [{...attendance,ordens_servico:[wrongParent?{...os,id_atendimento:999}:os,pending,cancelled,sameDay,nextMonth,...(incomplete?[]:[createdAfterCutoff])]},
+      {...otherAttendance,ordens_servico:[]}];
+  }};
+}
+async function collect(db,client) {
+  const id=await createHistoryJob(db,structuredClone(manifest));
+  await controlHistoryJob(db,id,'start');
+  let status;
+  for(let i=0;i<24;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
+  return {id,status};
+}
+
+test('corte do acompanhamento exige conclusão, referências próprias e dias completos',()=>{
+  assert.equal(validateManifest(manifest,'2026-10-28').peakDay,'2026-10-15');
+  const today=structuredClone(manifest);today.followupCutoff='2026-10-28';today.reports.followup.filters.followupCutoff=today.followupCutoff;
+  assert.throws(()=>validateManifest(today,'2026-10-28'),/CORTE/);
+  assert.throws(()=>validateManifest({...manifest,reports:{...manifest.reports,followup:undefined}},'2026-10-28'),/RELATORIOS/);
+  const invalid=structuredClone(manifest);invalid.followupCutoff='2026-10-14';invalid.reports.followup.filters.followupCutoff=invalid.followupCutoff;
+  assert.throws(()=>validateManifest(invalid,'2026-10-28'),/ANTERIOR/);
+  assert.throws(()=>validateManifest({...manifest,osDateField:'data_cadastro'},'2026-10-28'),/CAMPO_DATA|CONCLUSAO/);
+});
+
+test('OS preserva hora, converte offset para São Paulo e não inventa datas para pendentes',()=>{
+  assert.equal(orderDate('2026-10-16T01:30:45Z'),'15/10/2026 22:30:45');
+  assert.equal(orderDate('2026-10-16 01:30:00'),'16/10/2026 01:30:00');
+  assert.throws(()=>orderDate('2026-10-15'),/DATA/);
+  assert.throws(()=>orderDate('31/02/2026 10:00:00'),/DATA/);
+  assert.equal(followupOrder(pending,attendance,'2026-10-27').outcome,'pending_observed');
+  assert.equal(followupOrder(cancelled,attendance,'2026-10-27').outcome,'cancelled_observed');
+  assert.equal(followupOrder({...os,data_termino_executado:'28/10/2026 10:00:00'},attendance,'2026-10-27').outcome,'concluded_after_cutoff');
+  assert.equal(followupOrder(createdAfterCutoff,attendance,'2026-10-27'),null);
+});
+
+test('dia 15: produção por conclusão separada dos vínculos futuros, sem atribuir OS ao cliente errado',async()=>fixture(async db=>{
+  const client=fakeClient(),{id,status}=await collect(db,client);
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));
+  assert.deepEqual(status.totals.sort((a,b)=>a.kind.localeCompare(b.kind)).map(r=>r.unique_records),[2,3]);
+  assert.equal(client.calls.filter(c=>c.customer).length,1,'enriquece cliente distinto mesmo com autor já conhecido');
+  assert.deepEqual(client.calls.filter(c=>c.stream).map(c=>c.stream),['attendance','attendanceChanges','serviceOrderCompletions'],'consulta de conclusão não é repetida');
+  assert.ok(client.calls.every(c=>c.day==='2026-10-15'),'não amplia consultas externas para os dias de acompanhamento');
+  const draft=await followupReport(db,id);
+  assert.equal(draft.attendanceCount,2);assert.equal(draft.orderCount,5);assert.equal(draft.attendancesWithoutOrders,1);
+  assert.deepEqual(draft.completionsByDay,{'2026-10-20':1,'2026-10-15':1});
+  assert.equal(draft.outcomes.pending_observed,2);assert.equal(draft.outcomes.cancelled_observed,1);
+  assert.equal(draft.orders.find(o=>o.id_ordem_servico==='207').data_inicio_programado,'02/11/2026 09:00:00','preserva vínculo que atravessa mês');
+  assert.equal((await followupReport(db,id,{publishedOnly:true})).orderCount,0);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  await assert.rejects(approveHistoryMonth(db,id,{...evidence,followup:{...evidence.followup,ids:['204']}}),/RECONCILIACAO_ACOMPANHAMENTO/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0,'erro nos vínculos também reverte a produção');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM attendance_followup_snapshots')).rows[0].n,0);
+  await approveHistoryMonth(db,id,evidence);
+  assert.equal((await followupReport(db,id,{publishedOnly:true})).orderCount,5);
+  const source=(await db.query("SELECT id,payload FROM source_records WHERE kind='serviceOrders' ORDER BY id")).rows;
+  assert.deepEqual(source.map(r=>r.id),['hubsoft:204','hubsoft:205','hubsoft:206']);
+  assert.ok(source.every(r=>r.payload.data_referencia_bi==='data_termino_executado'));
+  assert.equal(source[1].payload.id_atendimento,'103','OS concluída no dia pode ter atendimento anterior');
+  const dates=(await db.query("SELECT (event_date AT TIME ZONE 'America/Sao_Paulo')::date::text AS day FROM commercial_records WHERE kind='serviceOrders'")).rows;
+  assert.equal(dates.length,3);assert.ok(dates.every(r=>r.day==='2026-10-15'),'BI usa conclusão, não programação');
+  const sales=(await db.query("SELECT payload FROM commercial_records WHERE kind='sales'")).rows;
+  assert.equal(sales.length,1,'órfã e atendimento anterior não são atribuídos a outro atendimento por cliente');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM attendance_order_followups')).rows[0].n,5);
+  const second=await collect(db,fakeClient());
+  await approveHistoryMonth(db,second.id,evidence);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM attendance_order_followups')).rows[0].n,5,'reexecutar o mesmo corte não duplica vínculos');
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,5,'reexecutar não duplica entidades');
+}));
+
+test('vínculos incompletos ou pai divergente pausam sem publicar nem perder o checkpoint',async()=>fixture(async db=>{
+  for(const options of [{incomplete:true},{wrongParent:true}]) {
+    const {id,status}=await collect(db,fakeClient(options));
+    assert.equal(status.state,'paused');
+    assert.equal(status.error_code,options.incomplete?'VINCULOS_OS_INCOMPLETOS':'VINCULO_OS_DIVERGENTE');
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM history_pages WHERE job_id=$1 AND NOT processed',[id])).rows[0].n,1);
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM history_followup_attendances WHERE job_id=$1',[id])).rows[0].n,0);
+  }
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+}));
+
+test('conclusão sem programação pode entrar; OS sem conclusão não recebe uma hora ou data substituta',async()=>fixture(async db=>{
+  const client=fakeClient();
+  const original=client.page;
+  client.page=async(...args)=>{
+    const result=await original(...args);
+    if(args[0]==='serviceOrderCompletions') result.records=result.records.filter(o=>o.id_ordem_servico!==201).map(o=>({...o,data_inicio_programado:null}));
+    return result;
+  };
+  const {id,status}=await collect(db,client);
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));
+  await approveHistoryMonth(db,id,evidence);
+  await rebuild(db);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM commercial_records WHERE kind='serviceOrders'")).rows[0].n,3);
+  const missing=fakeClient();missing.page=async(stream)=>({records:stream==='serviceOrderCompletions'?[pending]:[],complete:true});
+  assert.equal((await collect(db,missing)).status.error_code,'HUBSOFT_OS_CONCLUSAO_AUSENTE');
+}));

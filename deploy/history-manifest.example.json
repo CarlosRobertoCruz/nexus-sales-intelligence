@@ -1,20 +1,37 @@
 {
   "year": 2026,
   "phase": "day",
-  "peakDay": "SUBSTITUA_PELO_DIA_DE_PICO",
-  "cutoff": "SUBSTITUA_PELO_ULTIMO_DIA_COMPLETO",
-  "osDateField": "data_inicio_programado",
+  "peakDay": "2026-10-15",
+  "cutoff": "2026-10-15",
+  "osDateField": "data_termino_executado",
   "maxCalls": 500,
   "reports": {
     "attendance": {
       "fileSha256": "SUBSTITUA_PELO_SHA256_DO_RELATORIO",
       "exportedAt": "SUBSTITUA_PELO_INSTANTE_DA_EXPORTACAO",
-      "filters": {"dateField": "data_cadastro", "otherFilters": "none"}
+      "filters": {
+        "dateField": "data_cadastro",
+        "otherFilters": "none"
+      }
     },
     "serviceOrders": {
       "fileSha256": "SUBSTITUA_PELO_SHA256_DO_RELATORIO",
       "exportedAt": "SUBSTITUA_PELO_INSTANTE_DA_EXPORTACAO",
-      "filters": {"dateField": "data_inicio_programado", "otherFilters": "none"}
+      "filters": {
+        "dateField": "data_termino_executado",
+        "otherFilters": "none"
+      }
+    },
+    "followup": {
+      "fileSha256": "SUBSTITUA_PELO_SHA256_DA_CONFERENCIA_DOS_VINCULOS",
+      "exportedAt": "SUBSTITUA_PELO_INSTANTE_DA_EXPORTACAO",
+      "filters": {
+        "dateField": "data_cadastro",
+        "otherFilters": "none",
+        "relationship": "id_atendimento",
+        "followupCutoff": "SUBSTITUA_PELO_CORTE_DO_ACOMPANHAMENTO"
+      }
     }
-  }
+  },
+  "followupCutoff": "SUBSTITUA_PELO_CORTE_DO_ACOMPANHAMENTO"
 }

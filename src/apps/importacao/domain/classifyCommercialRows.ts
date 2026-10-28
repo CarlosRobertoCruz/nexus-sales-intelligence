@@ -4,6 +4,7 @@ import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReac
 type RowRecord = Readonly<Record<string, SpreadsheetCell>>;
 type ServiceOrder = {
   id: string;
+  attendanceId: string;
   customerCode: string;
   customerName: string;
   ticketIds: ReadonlyArray<string>;
@@ -18,6 +19,9 @@ type ServiceOrder = {
 
 type ServiceOrderIndex = {
   byId: ReadonlyMap<string, ServiceOrder>;
+  byAttendanceId: ReadonlyMap<string, ReadonlyArray<ServiceOrder>>;
+  all: ReadonlyArray<ServiceOrder>;
+  hasNativeIds: boolean;
   byCustomerCode: ReadonlyMap<string, ReadonlyArray<ServiceOrder>>;
   byCustomerName: ReadonlyMap<string, ReadonlyArray<ServiceOrder>>;
 };
@@ -60,7 +64,8 @@ function rowsFromWorksheet(worksheet: ImportedWorksheet, requiredHeaders: Readon
 
 function deduplicateRows(rows: ReadonlyArray<RowRecord>, key: string): ReadonlyArray<RowRecord> {
   const uniqueRows = new Map<string, RowRecord>();
-  for (const row of rows) uniqueRows.set(text(row, key), row);
+  const nativeKey=key === "protocolo" ? "id_atendimento" : key === "numero_ordem_servico" ? "id_ordem_servico" : null;
+  for (const row of rows) uniqueRows.set(nativeKey && text(row,nativeKey) ? `hubsoft:${text(row,nativeKey)}` : text(row,key),row);
   return [...uniqueRows.values()];
 }
 
@@ -163,6 +168,10 @@ function matchingTicketOrder(candidates: ReadonlyArray<ServiceOrder>, ticketIds:
 
 function resolveServiceOrder(row: RowRecord, combinedText: string, orders: ServiceOrderIndex): ServiceOrder | undefined {
   const explicitOrderId = extractOrderId(combinedText);
+  if (text(row,"id_atendimento") && orders.hasNativeIds) {
+    const linked=orders.byAttendanceId.get(text(row,"id_atendimento")) ?? [];
+    return linked.find(isCompletedInstallationOrder) ?? linked[0];
+  }
   if (explicitOrderId) return orders.byId.get(explicitOrderId);
 
   const ticketIds = extractTicketIds(combinedText);
@@ -190,6 +199,12 @@ function isCompletedInstallationOrder(order: ServiceOrder): boolean {
 }
 
 function attendanceForInstallationOrder(order: ServiceOrder, attendanceRows: ReadonlyArray<RowRecord>): RowRecord | undefined {
+  if (order.attendanceId) {
+    return attendanceRows.find(row=>text(row,"id_atendimento")===order.attendanceId
+      && isInstallationAttendance(row)
+      && (parseDate(row.data_cadastro)?.getTime() ?? Infinity)<=(order.executionStartedAt?.getTime() ?? 0));
+  }
+  if (order.id.startsWith("hubsoft:")) return undefined;
   const sameCustomer = attendanceRows.filter((row) => {
     const customerCode = text(row, "codigo_cliente");
     if (order.customerCode && customerCode) return order.customerCode === customerCode;
@@ -338,13 +353,16 @@ function isCompletedCancellation(combinedText: string, order: ServiceOrder | und
 
 function orderIndex(rows: ReadonlyArray<RowRecord>): ServiceOrderIndex {
   const byId = new Map<string, ServiceOrder>();
+  const byAttendanceId = new Map<string, ServiceOrder[]>();
+  const all: ServiceOrder[]=[];
   const byCustomerCode = new Map<string, ServiceOrder[]>();
   const byCustomerName = new Map<string, ServiceOrder[]>();
   for (const row of rows) {
     const id = text(row, "numero_ordem_servico");
     if (!/^\d+$/.test(id)) continue;
     const order: ServiceOrder = {
-      id,
+      id: text(row,"id_ordem_servico") ? `hubsoft:${text(row,"id_ordem_servico")}` : id,
+      attendanceId: text(row,"id_atendimento"),
       customerCode: text(row, "codigo_cliente"),
       customerName: text(row, "nome_razaosocial"),
       ticketIds: extractTicketIds(`${text(row, "descricao_abertura")} ${text(row, "descricao_servico")} ${text(row, "descricao_fechamento")}`),
@@ -357,10 +375,12 @@ function orderIndex(rows: ReadonlyArray<RowRecord>): ServiceOrderIndex {
       description: `${text(row, "descricao_abertura")} ${text(row, "descricao_servico")} ${text(row, "descricao_fechamento")}`,
     };
     byId.set(id, order);
+    all.push(order);
+    appendOrder(byAttendanceId,order.attendanceId,order);
     appendOrder(byCustomerCode, order.customerCode, order);
     appendOrder(byCustomerName, normalize(order.customerName), order);
   }
-  return { byId, byCustomerCode, byCustomerName };
+  return { byId, byAttendanceId, all, hasNativeIds: rows.some(row=>Boolean(text(row,"id_ordem_servico"))), byCustomerCode, byCustomerName };
 }
 
 function importPeriodKey(start: Date, end: Date): string {
@@ -422,7 +442,7 @@ export function classifyCommercialRows(
     const normalized = normalize(combined);
     const linkedOrder = resolveServiceOrder(row, combined, orders);
     if (linkedOrder) linkedServiceOrders += 1;
-    processedAttendance.push({ id: protocol, date, linkedServiceOrder: Boolean(linkedOrder) });
+    processedAttendance.push({ id: text(row,"id_atendimento") ? `hubsoft:${text(row,"id_atendimento")}` : protocol, date, linkedServiceOrder: Boolean(linkedOrder) });
     const seller = resolveSeller(row, combined);
     const plan = extractPlan(combined);
 
@@ -465,7 +485,7 @@ export function classifyCommercialRows(
 
   }
 
-  for (const linkedOrder of orders.byId.values()) {
+  for (const linkedOrder of orders.all) {
     if (!isCompletedInstallationOrder(linkedOrder) || !linkedOrder.executionFinishedAt) continue;
     const row = attendanceForInstallationOrder(linkedOrder, attendanceRows);
     if (!row) continue;
@@ -475,7 +495,7 @@ export function classifyCommercialRows(
     const seller = resolveSeller(row, combined);
     sales.push({
       id: linkedOrder.id,
-      attendanceId: text(row, "protocolo"),
+      attendanceId: text(row,"id_atendimento") ? `hubsoft:${text(row,"id_atendimento")}` : text(row,"protocolo"),
       businessKey: installationBusinessKey(linkedOrder),
       date: commercialDate,
       customer: text(row, "nome_razaosocial") || linkedOrder.customerName || "Cliente não informado",
@@ -497,9 +517,9 @@ export function classifyCommercialRows(
   const periodKey = importPeriodKey(periodStart, periodEnd);
   for (const row of osRows) {
     if (!isReactivationServiceOrder(row)) continue;
-    const date = parseDate(row.data_inicio_programado);
+    const date = parseDate(row.data_referencia_bi === "data_termino_executado" ? row.data_termino_executado : row.data_inicio_programado);
     if (!date) continue;
-    reactivations.push({ id: text(row, "numero_ordem_servico"), date });
+    reactivations.push({ id: text(row,"id_ordem_servico") ? `hubsoft:${text(row,"id_ordem_servico")}` : text(row,"numero_ordem_servico"), date });
   }
   const commercialNames = attendanceRows.filter((row) => SELLERS.some((seller) => seller.pattern.test(normalize(text(row, "usuario_abertura"))))).length;
   const warnings: string[] = [];
@@ -524,7 +544,12 @@ export function classifyCommercialRows(
     periodEnd,
     periodKey,
     attendance: processedAttendance,
-    serviceOrders: osRows.map((row) => ({ id: text(row, "numero_ordem_servico"), date: parseDate(row.data_inicio_programado) ?? periodStart, periodKey })),
+    serviceOrders: osRows.flatMap((row) => {
+      const byCompletion=row.data_referencia_bi === "data_termino_executado";
+      const date=parseDate(byCompletion ? row.data_termino_executado : row.data_inicio_programado);
+      if(byCompletion && !date) return [];
+      return [{id:text(row,"id_ordem_servico") ? `hubsoft:${text(row,"id_ordem_servico")}` : text(row,"numero_ordem_servico"),date:date ?? periodStart,periodKey}];
+    }),
     sales: uniqueSales,
     renewals: uniqueRenewals,
     cancellations,

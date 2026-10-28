@@ -22,6 +22,7 @@ await pg.exec(
 );
 await pg.exec(sql);
 await pg.exec(await readFile(new URL("../../database/migrations/002_history.sql",import.meta.url),"utf8"));
+await pg.exec(await readFile(new URL("../../database/migrations/003_attendance_followups.sql",import.meta.url),"utf8"));
 // PGlite is a real embedded PostgreSQL engine. Advisory locks are single-process no-ops in this test adapter.
 const query = async (text, params = []) =>
   text.includes("pg_advisory") || text.includes("pg_try_advisory")
@@ -121,6 +122,22 @@ test("SQL schema, password hashing, authenticated imports and shared persisted m
     await new Promise((r) => server.close(r));
     await pool.end();
     await pg.close();
+  });
+  await t.test("followup API requires a session and exposes only validated months", async () => {
+    const jobId=randomUUID(),path=`/hubsoft/history/${jobId}/followup`;
+    assert.equal((await request(path)).status,401);
+    await query("INSERT INTO history_jobs(id,phase,manifest) VALUES($1,'day',$2::jsonb)",[jobId,JSON.stringify({followupCutoff:'2026-10-27'})]);
+    await query("INSERT INTO history_months(job_id,month) VALUES($1,'2026-10')",[jobId]);
+    await query("INSERT INTO history_followup_attendances(job_id,month,attendance_id,opened_on,observed_at,received_orders) VALUES($1,'2026-10','101','2026-10-15',now(),0)",[jobId]);
+    const cookie=await login();
+    assert.equal((await (await request(path,'GET',undefined,cookie)).json()).attendanceCount,0);
+    await query("UPDATE history_months SET state='published' WHERE job_id=$1",[jobId]);
+    const response=await request(path,'GET',undefined,cookie);
+    assert.equal(response.status,200);
+    const result=await response.json();
+    assert.equal(result.attendanceCount,1);assert.equal(result.attendancesWithoutOrders,1);
+    assert.equal(result.scope,'attendance_cohort_not_production');
+    assert.equal(result.statusBasis,'observed_at_extraction_not_historical_snapshot');
   });
   await t.test("tables are in the isolated schema", async () => {
     const tables = (
