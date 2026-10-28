@@ -1,0 +1,73 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
+const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth,historyStatus}=await import('../history.mjs');
+const {pool}=await import('../db.mjs');
+const {upsertRows}=await import('../records.mjs');
+const {validateManifest,localDay,nextWindowAt}=await import('../historyPolicy.mjs');
+const {projectHistoryRecord}=await import('../historyProjection.mjs');
+const reports={attendance:{fileSha256:'a'.repeat(64),exportedAt:'2026-10-02T00:00:00Z',filters:{dateField:'data_cadastro',otherFilters:'none'}},serviceOrders:{fileSha256:'b'.repeat(64),exportedAt:'2026-10-02T00:00:00Z',filters:{dateField:'data_inicio_programado',otherFilters:'none'}}};
+const manifest={year:2026,phase:'day',peakDay:'2026-10-01',cutoff:'2026-10-01',osDateField:'data_inicio_programado',maxCalls:500,reports};
+const a={id_atendimento:101,protocolo:'202610010001',nome_razaosocial:'Cliente teste',cliente:{codigo_cliente:12,nome_razaosocial:'Cliente teste'},codigo_cliente:12,descricao_abertura:'600 Mega Combo Plus',data_cadastro:'01/10/2026',usuario_abertura:'Beatriz',status:'Finalizado',tipo_atendimento:'Instalacao'};
+const os={id_ordem_servico:201,numero_ordem_servico:'201',tipo:'INSTALACAO',cliente:a.cliente,status:'finalizado',data_cadastro:'01/10/2026 08:00:00',data_inicio_programado:'01/10/2026 09:00:00',data_inicio_executado:'01/10/2026 09:00:00',data_termino_executado:'01/10/2026 10:00:00',usuario_abertura:'Beatriz'};
+test('manifesto exige relatórios e dia completo; datas não inventam hora',()=>{
+  assert.equal(validateManifest(manifest,'2026-10-28').year,2026);
+  assert.throws(()=>validateManifest({...manifest,reports:{}},'2026-10-28'),/RELATORIOS/);
+  assert.throws(()=>validateManifest({...manifest,cutoff:'2026-10-28'},'2026-10-28'),/CORTE/);
+  assert.throws(()=>validateManifest({...manifest,phase:'october',cutoff:'2026-10-27'},'2026-10-28'),/OUTUBRO/);
+  assert.equal(localDay('01/10/2026'),'2026-10-01');
+  assert.throws(()=>localDay('01/10/2026',true),/DATA/);
+  assert.throws(()=>localDay('31/02/2026'),/DATA/);
+});
+test('janela noturna respeita o fuso e staging remove campos desnecessários',()=>{
+  const allowed=Date.parse('2026-10-28T01:00:00Z');
+  assert.equal(nextWindowAt({start:'22:00',end:'06:00'},allowed),allowed);
+  const outside=Date.parse('2026-10-28T12:00:00Z');
+  assert.equal(nextWindowAt({start:'22:00',end:'06:00'},outside),Date.parse('2026-10-29T01:00:00Z'));
+  const row=projectHistoryRecord({id_atendimento:1,cpf_cnpj:'privado',token:'segredo',cliente:{codigo_cliente:12,nome_razaosocial:'Teste',cpf_cnpj:'privado'},usuario_abertura:{name:'Pessoa',email:'privado'},parametros:{senha:'segredo'}});
+  assert.equal(JSON.stringify(row).includes('privado'),false);
+  assert.equal(JSON.stringify(row).includes('segredo'),false);
+  assert.equal(row.usuario_abertura.name,'Pessoa');
+});
+test('histórico preserva páginas, agrupa cliente, deduplica OS e só publica após confronto dos IDs',async()=>{
+  const pg=new PGlite();
+  try {
+    await pg.exec(await readFile(new URL('../../database/migrations/001_initial.sql',import.meta.url),'utf8'));
+    await pg.exec(await readFile(new URL('../../database/migrations/002_history.sql',import.meta.url),'utf8'));
+    const query=async(sql,args=[])=>sql.includes('advisory')?{rows:[{locked:true}]}:pg.query(sql,args);
+    const db={query}; const adapter={query,connect:async()=>({query,release(){}})};
+    pool.query=query; pool.connect=adapter.connect;
+    const id=await createHistoryJob(db,manifest);
+    const calls=[];
+    const raw={...a,usuario_abertura:null};
+    const raw2={...raw,id_atendimento:102,protocolo:'202610010002'};
+    const client={page:async(stream)=>{calls.push(stream); return {records:stream==='attendance'?[raw,raw2]:stream==='serviceOrders'?[os,{...os,id_ordem_servico:202,numero_ordem_servico:'202',atendimento:null}]:[],complete:true};},clientAttendances:async(code,day)=>{calls.push(`client:${code}:${day}`);return [{...a,ordens_servico:[os]},{...a,id_atendimento:102,protocolo:'202610010002',usuario_abertura:'Carlos'}];}};
+    assert.equal((await historyStep(adapter,client,id)).state,'planned');
+    assert.equal(calls.length,0,'planejado não chama API');
+    await controlHistoryJob(db,id,'start');
+    await controlHistoryJob(db,id,'pause');
+    assert.equal((await historyStep(adapter,client,id)).state,'paused');
+    assert.equal(calls.length,0,'pausa não executa chamadas');
+    await controlHistoryJob(db,id,'start');
+    let status;
+    for(let i=0;i<20;i++){status=await historyStep(adapter,client,id);if(status.state!=='running')break;}
+    assert.equal(status.state,'awaiting_validation',JSON.stringify(status));
+    assert.equal(calls.filter(c=>c.startsWith('client:')).length,1,'dois autores do mesmo cliente usam uma consulta');
+    assert.equal(calls.filter(c=>c==='attendance').length,1,'página pendente não é consultada novamente');
+    assert.equal(Number((await query('SELECT count(*) AS n FROM source_records')).rows[0].n),0);
+    assert.deepEqual(status.totals.sort((x,y)=>x.kind.localeCompare(y.kind)).map(r=>r.unique_records),[2,2]);
+    const evidence={month:'2026-10',reviewer:'Operador Teste',confirmFilters:true,attendance:{reportSha256:'a'.repeat(64),ids:['101','102']},serviceOrders:{reportSha256:'b'.repeat(64),ids:['201','202']}};
+    await assert.rejects(approveHistoryMonth(adapter,id,{...evidence,serviceOrders:{...evidence.serviceOrders,ids:['201']}}),/RECONCILIACAO/);
+    assert.equal(Number((await query('SELECT count(*) AS n FROM source_records')).rows[0].n),0,'reconciliação divergente faz rollback');
+    await approveHistoryMonth(adapter,id,evidence);
+    assert.equal((await historyStatus(db,id)).state,'complete');
+    const saved=(await query("SELECT id,payload FROM source_records WHERE kind='attendance' ORDER BY id")).rows;
+    assert.deepEqual(saved.map(r=>r.id),['hubsoft:101','hubsoft:102']);
+    assert.equal(saved[1].payload.usuario_abertura,'Carlos','autor pertence ao atendimento, não ao cliente');
+    assert.equal(saved[0].payload.data_cadastro,'01/10/2026');
+    await query('BEGIN'); await upsertRows(db,'attendance',saved.map(r=>r.payload),'hubsoft'); await query('COMMIT');
+    assert.equal(Number((await query('SELECT count(*) AS n FROM source_records')).rows[0].n),4,'repetir mantém quatro entidades únicas');
+  } finally {await pg.close();}
+});

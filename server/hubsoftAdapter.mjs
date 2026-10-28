@@ -91,6 +91,7 @@ export function normalizeHubsoft(kind, row, userNames = {}) {
       usuario_abertura: user, tipo_atendimento: type, data_cadastro: date,
     }, ["protocolo"]);
     return {
+      ...(row.id_atendimento != null ? { id_atendimento:String(row.id_atendimento) } : {}),
       protocolo: protocol,
       nome_razaosocial: customer,
       codigo_cliente: clientCode,
@@ -118,6 +119,10 @@ export function normalizeHubsoft(kind, row, userNames = {}) {
     status, data_inicio_programado: date,
   }, ["numero_ordem_servico"]);
   return {
+    ...(row.id_ordem_servico != null ? {id_ordem_servico:String(row.id_ordem_servico)} : {}),
+    ...(pick(row,"usuario_abertura") ? {usuario_abertura:pick(row,"usuario_abertura")} : {}),
+    ...((row.id_atendimento ?? row.atendimento?.id_atendimento) != null ? {id_atendimento:String(row.id_atendimento ?? row.atendimento.id_atendimento)} : {}),
+    ...(row.data_cadastro ? {data_cadastro:diagnosticDate(kind,"data_inicio_programado",row.data_cadastro)} : {}),
     numero_ordem_servico: number,
     tipo_ordem_servico: type,
     status,

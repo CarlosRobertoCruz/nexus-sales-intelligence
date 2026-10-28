@@ -21,6 +21,7 @@ await pg.exec(
   "CREATE SCHEMA nexus_sales_intelligence; SET search_path TO nexus_sales_intelligence,public; CREATE TABLE schema_migrations(name text PRIMARY KEY,checksum text NOT NULL);",
 );
 await pg.exec(sql);
+await pg.exec(await readFile(new URL("../../database/migrations/002_history.sql",import.meta.url),"utf8"));
 // PGlite is a real embedded PostgreSQL engine. Advisory locks are single-process no-ops in this test adapter.
 const query = async (text, params = []) =>
   text.includes("pg_advisory") || text.includes("pg_try_advisory")

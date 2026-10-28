@@ -87,10 +87,21 @@ export function worksheetRecords(worksheet, kind) {
 }
 export async function upsertRows(db, kind, records, source) {
   if (!records.length) return;
-  const values = records.map((payload) => ({
-    id: String(payload[keys[kind]]),
-    payload,
-  }));
+  const values = [];
+  const idField=kind==="attendance"?"id_atendimento":"id_ordem_servico";
+  for(const payload of records) {
+    const businessKey=String(payload[keys[kind]]);
+    const upstream=payload[idField];
+    if(upstream!==undefined && !/^\d{1,40}$/.test(String(upstream))) throw new Error("IDENTIFICADOR_INVALIDO");
+    const existing=(await db.query(`SELECT id,payload FROM source_records WHERE kind=$1 AND payload->>$2=$3`,[kind,keys[kind],businessKey])).rows;
+    if(existing.length>1) throw new Error("IDENTIDADE_LEGADA_AMBIGUA");
+    const canonical=upstream!==undefined ? "hubsoft:"+String(upstream) : existing[0]?.id??businessKey;
+    if(upstream!==undefined && existing[0] && existing[0].id!==canonical) {
+      if(existing[0].payload[idField] && String(existing[0].payload[idField])!==String(upstream)) throw new Error("IDENTIDADE_LEGADA_AMBIGUA");
+      await db.query("UPDATE source_records SET id=$3 WHERE kind=$1 AND id=$2",[kind,existing[0].id,canonical]);
+    }
+    values.push({id:canonical,payload});
+  }
   // Same business record from a spreadsheet and from Hubsoft has the same key.
   const unique = [...new Map(values.map((v) => [v.id, v])).values()];
   await db.query(

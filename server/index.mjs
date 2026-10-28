@@ -66,6 +66,7 @@ export const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     if (req.method === "GET" && path === "/api/ready") {
       await pool.query("SELECT 1 FROM schema_migrations LIMIT 1");
+      await pool.query("SELECT id FROM hubsoft_gate WHERE id=1");
       return send(res, 200, { ok: true });
     }
     if (!["GET", "POST"].includes(req.method))

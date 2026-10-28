@@ -369,3 +369,8 @@ Os nomes já resolvidos ficam temporariamente em `application_settings`, com cha
 Não é necessário informar IDs manualmente quando a consulta documentada retornar o nome. Se a consulta não trouxer o nome ou devolver protocolo diferente/múltiplos atendimentos, o painel informa um erro e interrompe a página. As permissões e a compatibilidade da instância real continuam sujeitas à validação pontual após o deploy.
 
 Esta atualização inclui também a rolagem independente da lateral em desktop. Reconstrua **API e web**, sequencialmente; não há nova migração. Após publicar, consulte um único dia conhecido, sem marcar reinício, e continue manualmente se pausar. A implementação foi validada com respostas simuladas, sem requisições reais à Hubsoft.
+
+
+## Preparacao da carga historica de 2026
+
+Esta etapa adiciona a migracao `002_history.sql`, gate compartilhado com a consulta manual, cache OAuth cifrado e um script opt-in. Reconstruir API e web e executar migrate antes da API nova. A carga permanece desativada por padrao; nao adicionar flags true nem iniciar job durante o deploy. Consulte [HISTORY.md](HISTORY.md) para planejamento offline, requisitos dos relatorios, operacao dos pilotos e validacao antes da publicacao. Nao exige autorizacao adicional de administrador Hubsoft; exige as permissoes tecnicas da credencial existente e coordenacao dos consumidores do IP.

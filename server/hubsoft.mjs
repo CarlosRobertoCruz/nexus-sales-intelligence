@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { retryDelay, safePolicy } from "./hubsoftGate.mjs";
 const READ_PATHS = new Set([
   "/api/v1/integracao/atendimento/todos",
   "/api/v1/integracao/cliente/atendimento",
@@ -20,7 +21,8 @@ export function validateDay(day) {
   return day;
 }
 export class HubsoftClient {
-  constructor(env = process.env, fetcher = fetch, sleep = delay) {
+  constructor(env = process.env, fetcher = fetch, sleep = delay, gate = null) {
+    this.gate = gate;
     this.env = env;
     this.fetcher = fetcher;
     this.sleep = sleep;
@@ -56,10 +58,16 @@ export class HubsoftClient {
       throw new HubsoftError("URL_HUBSOFT_INVALIDA");
     const url = new URL(path, base);
     if (method === "GET" && path === "/api/v1/integracao/cliente/atendimento") {
+      if (body.clientCode !== undefined) {
+        if (!/^\d{1,40}$/.test(String(body.clientCode))) throw new HubsoftError("CLIENTE_INVALIDO");
+        validateDay(body.day);
+        url.search = new URLSearchParams({ busca:"codigo_cliente", termo_busca:String(body.clientCode), limit:"50", apenas_pendente:"nao", data_inicio:body.day, data_fim:body.day, order_by:"data_cadastro", order_type:"asc" }).toString();
+      } else {
       if (typeof body.protocol !== "string" || !/^\d{1,40}$/.test(body.protocol))
         throw new HubsoftError("PROTOCOLO_INVALIDO");
       url.search = new URLSearchParams({ busca: "protocolo", termo_busca: body.protocol,
         limit: "1", apenas_pendente: "nao", order_by: "data_cadastro", order_type: "asc" }).toString();
+      }
     } else if (method === "GET") {
       validateDay(body.day);
       if (!Number.isInteger(body.page) || body.page < 0)
@@ -78,6 +86,21 @@ export class HubsoftClient {
           ? { order_by: "id_atendimento", order_by_key: "ASC" }
           : {}),
       }).toString();
+    }
+    const send = async () => {
+      let response;
+      try { response = await this.fetcher(url, { method, redirect:"error", signal:AbortSignal.timeout(25000), headers:{ Accept:"application/json", ...(token?{Authorization:"Bearer "+token}:{}), ...(method==="POST"?{"Content-Type":"application/json"}:{}) }, ...(method==="POST"?{body:JSON.stringify(body)}:{}) }); }
+      catch { throw new HubsoftError("HUBSOFT_CONEXAO_OU_TIMEOUT"); }
+      const bytes = await limitedBody(response,8*1024*1024);
+      let data,error;
+      try { data=JSON.parse(bytes); } catch { data={}; if(response.status!==429) error=new HubsoftError("HUBSOFT_RESPOSTA_INVALIDA"); }
+      if(!response.ok && response.status!==429) error=new HubsoftError(response.status===401?"HUBSOFT_AUTENTICACAO":"HUBSOFT_HTTP_"+response.status);
+      if(data.status==="error"||data.status==="erro"||data.status===false) error=new HubsoftError("HUBSOFT_CONSULTA_RECUSADA");
+      return {status:response.status,data,error,policy:safePolicy(response.headers.get("X-RateLimit-Policy")),retrySeconds:retryDelay(response,data)};
+    };
+    if(this.gate) {
+      try { return await this.gate.perform({method,path},send); }
+      catch(error) { if(error.code==="HUBSOFT_AUTENTICACAO") { this.token=null; this.expires=0; await this.gate.invalidateToken(); } throw error; }
     }
     if (this.lastCall > Date.now() + 1000)
       throw new HubsoftError("HUBSOFT_LIMITE_AGUARDE");
@@ -135,13 +158,14 @@ export class HubsoftClient {
   async authenticate() {
     if (!this.configured) throw new HubsoftError("HUBSOFT_NAO_CONFIGURADA");
     if (!this.token || Date.now() >= this.expires) {
-      const d = await this.request("POST", "/oauth/token", {
+      const issue = () => this.request("POST", "/oauth/token", {
         grant_type: "password",
         client_id: this.env.HUBSOFT_CLIENT_ID,
         client_secret: this.env.HUBSOFT_CLIENT_SECRET,
         username: this.env.HUBSOFT_USERNAME,
         password: this.env.HUBSOFT_PASSWORD,
       });
+      const d = this.gate ? await this.gate.token(issue) : await issue();
       if (
         typeof d.access_token !== "string" ||
         !Number.isFinite(Number(d.expires_in)) ||
@@ -150,8 +174,20 @@ export class HubsoftClient {
         throw new HubsoftError("HUBSOFT_TOKEN_INVALIDO");
       this.token = d.access_token;
       this.expires =
-        Date.now() + Math.max(0, Number(d.expires_in) * 1000 - 30000);
+        Date.now() + Math.max(0, Number(d.expires_in) * 1000);
     }
+  }
+  clientAttendances(clientCode, day) {
+    const task=this.queue.then(async()=>{
+      validateDay(day);
+      if(!/^\d{1,40}$/.test(String(clientCode))) throw new HubsoftError("CLIENTE_INVALIDO");
+      await this.authenticate();
+      const data=await this.request("GET","/api/v1/integracao/cliente/atendimento",{clientCode,day},this.token);
+      if(!Array.isArray(data.atendimentos)||data.atendimentos.length>=50) throw new HubsoftError("HUBSOFT_CLIENTE_PAGINACAO_NAO_CONFIRMADA");
+      for(const row of data.atendimentos) if(String(row.cliente?.codigo_cliente??row.codigo_cliente)!==String(clientCode)) throw new HubsoftError("HUBSOFT_CLIENTE_DIVERGENTE");
+      return data.atendimentos;
+    });
+    this.queue=task.catch(()=>{}); return task;
   }
   attendanceOpener(protocol) {
     const task = this.queue.then(async () => {
@@ -176,7 +212,7 @@ export class HubsoftClient {
     this.queue = task.catch(() => {});
     return task;
   }
-  page(stream, day, page) {
+  page(stream, day, page, dateFieldOverride) {
     const task = this.queue.then(async () => {
       validateDay(day);
       if (
@@ -216,6 +252,7 @@ export class HubsoftClient {
           dateField: "data_inicio_programado",
         },
       };
+      if(dateFieldOverride && (stream!=="serviceOrders" || !["data_cadastro","data_inicio_programado","data_termino_executado"].includes(dateFieldOverride))) throw new HubsoftError("FILTRO_OS_INVALIDO");
       const spec = streams[stream];
       if (!spec) throw new HubsoftError("FLUXO_INVALIDO");
       let data;
@@ -223,7 +260,7 @@ export class HubsoftClient {
         data = await this.request(
           "GET",
           spec.path,
-          { day, page, dateField: spec.dateField, relations: spec.relations },
+          { day, page, dateField: dateFieldOverride ?? spec.dateField, relations: spec.relations },
           this.token,
         );
       } catch (e) {
