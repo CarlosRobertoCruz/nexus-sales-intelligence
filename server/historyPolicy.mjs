@@ -17,21 +17,30 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   if(!/^2026-\d{2}-\d{2}$/.test(m.cutoff??'') || m.cutoff>=today) return fail('CORTE_EXIGE_DIA_COMPLETO');
   if(new Date(m.cutoff+'T12:00:00Z').toISOString().slice(0,10)!==m.cutoff) return fail('CORTE_INVALIDO');
   if(!['data_cadastro','data_inicio_programado','data_termino_executado'].includes(m.osDateField)) return fail('FILTRO_OS_INVALIDO');
-  for(const reports of m.phase==='history'?monthsFor(m).map(month=>m.monthReports?.[month]):[m.reports]) for(const kind of ['attendance','serviceOrders']) {
+  for(const reports of m.phase==='history'?monthsFor(m).map(month=>m.monthReports?.[month]):[m.reports]) for(const kind of ['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])]) {
     const report=reports?.[kind];
     if(!report || typeof report.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(report.fileSha256)||!report.filters||typeof report.filters!=='object'||!report.exportedAt) return fail('RELATORIOS_OBRIGATORIOS');
     if(report.filters.otherFilters!=='none') return fail('FILTROS_ADICIONAIS_EXIGEM_MAPEAMENTO');
-    const expected=kind==='attendance'?'data_cadastro':m.osDateField;
+    const expected=kind==='serviceOrders'?m.osDateField:'data_cadastro';
+    if(kind==='followup' && (report.filters.followupCutoff!==m.followupCutoff||report.filters.relationship!=='id_atendimento')) return fail('FILTRO_ACOMPANHAMENTO_INVALIDO');
     if(report.filters.dateField!==expected) return fail('CAMPO_DATA_DIVERGENTE');
   }
   if(!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>100000) return fail('ORCAMENTO_OBRIGATORIO');
   if(m.window && (!/^\d{2}:\d{2}$/.test(m.window.start??'')||!/^\d{2}:\d{2}$/.test(m.window.end??'')||m.window.start===m.window.end||[m.window.start,m.window.end].some(v=>+v.slice(0,2)>23||+v.slice(3)>59))) return fail('JANELA_INVALIDA');
-  if(m.autoPublish && (m.phase!=='history'||!m.reviewer||monthsFor(m).some(month=>['attendance','serviceOrders'].some(kind=>!Array.isArray(m.monthReports?.[month]?.[kind]?.ids))))) return fail('EVIDENCIAS_MENSAIS_OBRIGATORIAS');
+  if(m.autoPublish && (m.phase!=='history'||!m.reviewer||monthsFor(m).some(month=>['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])].some(kind=>!Array.isArray(m.monthReports?.[month]?.[kind]?.ids))))) return fail('EVIDENCIAS_MENSAIS_OBRIGATORIAS');
   if(m.phase==='day' && (!/^2026-10-\d{2}$/.test(m.peakDay??'')||m.peakDay>m.cutoff)) return fail('DIA_PILOTO_INVALIDO');
   if(m.phase==='day' && new Date(m.peakDay+'T12:00:00Z').toISOString().slice(0,10)!==m.peakDay) return fail('DIA_PILOTO_INVALIDO');
   if(m.phase==='october' && (m.cutoff<'2026-10-31'||today<='2026-10-31')) return fail('OUTUBRO_AINDA_ABERTO');
   if(m.phase==='history' && !m.approvedOctoberJob) return fail('PILOTO_OUTUBRO_OBRIGATORIO');
   if(m.phase==='history' && m.cutoff<'2026-10-31') return fail('OUTUBRO_AINDA_ABERTO');
+  if(m.followupCutoff!==undefined) {
+    if(m.osDateField!=='data_termino_executado') return fail('ACOMPANHAMENTO_EXIGE_CONCLUSAO');
+    if(!/^2026-\d{2}-\d{2}$/.test(m.followupCutoff)||m.followupCutoff>=today) return fail('CORTE_ACOMPANHAMENTO_INVALIDO');
+    const [y,mo,d]=m.followupCutoff.split('-');
+    localDay(`${d}/${mo}/${y}`);
+    const lastDay=daysFor(m,monthsFor(m).at(-1)).at(-1);
+    if(m.followupCutoff<lastDay) return fail('CORTE_ACOMPANHAMENTO_ANTERIOR_AO_PERIODO');
+  }
   return m;
 }
 export function monthsFor(m) { return m.phase==='history' ? Array.from({length:9},(_,i)=>`2026-${String(i+1).padStart(2,'0')}`) : ['2026-10']; }

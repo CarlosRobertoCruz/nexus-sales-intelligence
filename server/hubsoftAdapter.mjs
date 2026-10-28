@@ -22,7 +22,7 @@ function diagnosticDate(kind, field, value) {
   try { return apiDate(value); }
   catch { throw new HubsoftMappingError("HUBSOFT_DATA_NAO_RECONHECIDA", kind, [], [field]); }
 }
-export function normalizeHubsoft(kind, row, userNames = {}) {
+export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled = true } = {}) {
   let clientCode = pick(
     row,
     "codigo_cliente",
@@ -116,7 +116,7 @@ export function normalizeHubsoft(kind, row, userNames = {}) {
   const date = diagnosticDate(kind, "data_inicio_programado", pick(row, "data_inicio_programado"));
   requireHubsoftFields("HUBSOFT_OS_CAMPOS_INSUFICIENTES", kind, {
     numero_ordem_servico: number, nome_razaosocial: customer, tipo_ordem_servico: type,
-    status, data_inicio_programado: date,
+    status, ...(requireScheduled ? {data_inicio_programado: date} : {}),
   }, ["numero_ordem_servico"]);
   return {
     ...(row.id_ordem_servico != null ? {id_ordem_servico:String(row.id_ordem_servico)} : {}),

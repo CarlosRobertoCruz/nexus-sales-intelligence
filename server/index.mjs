@@ -1,5 +1,6 @@
 import { safeHubsoftDiagnostic } from "./hubsoftDiagnostics.mjs";
 import http from "node:http";
+import { followupReport } from "./historyFollowup.mjs";
 import { createUser, listUsers } from "./users.mjs";
 import { pool, transaction } from "./db.mjs";
 import { passwordHash, verifyPassword, newToken, hashToken } from "./auth.mjs";
@@ -67,6 +68,7 @@ export const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && path === "/api/ready") {
       await pool.query("SELECT 1 FROM schema_migrations LIMIT 1");
       await pool.query("SELECT id FROM hubsoft_gate WHERE id=1");
+      await pool.query("SELECT attendance_id FROM attendance_followup_snapshots LIMIT 1");
       return send(res, 200, { ok: true });
     }
     if (!["GET", "POST"].includes(req.method))
@@ -161,6 +163,10 @@ export const server = http.createServer(async (req, res) => {
         return importWorksheets(db, input, user.id);
       });
       return send(res, 200, result);
+    }
+    const followupPath=/^\/api\/hubsoft\/history\/([a-f\d-]{36})\/followup$/i.exec(path);
+    if (req.method === "GET" && followupPath) {
+      return send(res, 200, await followupReport(pool,followupPath[1],{publishedOnly:true}));
     }
     if (req.method === "GET" && path === "/api/hubsoft/status") {
       const runs = (
