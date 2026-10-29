@@ -12,8 +12,20 @@ export function localDay(value,requiredTime=false) {
   if(new Date(day+'T12:00:00Z').toISOString().slice(0,10)!==day || +h>23 || +mi>59 || +s>59) return fail('HUBSOFT_DATA_NAO_RECONHECIDA');
   return day;
 }
+// Opt-in permission is bound to the existing daily pilot, never inherited by another job.
+export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
+  const strategy=m?.enrichmentStrategy??'client';
+  if(strategy==='client') return false;
+  if(strategy!=='protocol') return fail('ESTRATEGIA_ENRIQUECIMENTO_INVALIDA');
+  const permission=m.protocolException;
+  if(m.year!==2026||m.phase!=='day'||m.peakDay!=='2026-10-01'||!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>500||
+      permission?.enabled!==true||permission.day!==m.peakDay||permission.jobId!==jobId||
+      !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(permission.jobId??'')) return fail('EXCECAO_PROTOCOLO_FORA_DO_PILOTO');
+  return true;
+}
 export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo'})) {
   if(!m||m.year!==2026||!['day','october','history'].includes(m.phase)) return fail('MANIFESTO_INVALIDO');
+  usesProtocolPilot(m);
   if(!/^2026-\d{2}-\d{2}$/.test(m.cutoff??'') || m.cutoff>=today) return fail('CORTE_EXIGE_DIA_COMPLETO');
   if(new Date(m.cutoff+'T12:00:00Z').toISOString().slice(0,10)!==m.cutoff) return fail('CORTE_INVALIDO');
   if(!['data_cadastro','data_inicio_programado','data_termino_executado'].includes(m.osDateField)) return fail('FILTRO_OS_INVALIDO');

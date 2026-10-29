@@ -5,7 +5,7 @@ import {PGlite} from '@electric-sql/pglite';
 process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
 process.env.TZ='America/Sao_Paulo';
 const {pool}=await import('../db.mjs');
-const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth}=await import('../history.mjs');
+const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
 const {followupReport,orderDate,followupOrder}=await import('../historyFollowup.mjs');
 const {validateManifest}=await import('../historyPolicy.mjs');
 const {rebuild}=await import('../records.mjs');
@@ -170,4 +170,69 @@ test('conferência por planilha é local, mantém IDs canônicos e não publica 
   await approveHistoryMonth(db,id,{...proof,followup:{reportSha256:refs.followup.fileSha256,keys:refs.followup.keys}});
   assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,5);
   await assert.rejects(attachHistoryReports(db,id,refs),/ESTADO_NAO_PERMITE/);
+}));
+
+test('piloto retoma a página já salva por protocolo com cache próprio, sem apagar consultas por cliente',async()=>fixture(async db=>{
+  const m={...structuredClone(manifest),peakDay:'2026-10-01',cutoff:'2026-10-01'};
+  const first={...attendance,data_cadastro:'01/10/2026',ordem_servico_count:0};
+  const second={...otherAttendance,data_cadastro:'01/10/2026',ordem_servico_count:0};
+  const calls=[];
+  const client={page:async stream=>{calls.push(stream);return {records:stream==='attendance'?[first,second]:stream==='attendanceChanges'?[first]:[],complete:true};},
+    clientAttendances:async()=>{calls.push('client');return [];},
+    attendanceDetail:async protocol=>{calls.push(`protocol:${protocol}`);return {...(protocol===first.protocolo?first:second),ordens_servico:[],cliente:{...first.cliente,cpf_cnpj:'do-not-persist'},token:'do-not-persist'};}};
+  const id=await createHistoryJob(db,m);
+  await controlHistoryJob(db,id,'start');
+  let status;
+  for(let i=0;i<5;i++){status=await historyStep(db,client,id);if(status.state==='paused')break;}
+  assert.equal(status.error_code,'HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO');
+  const original=(await db.query('SELECT records FROM history_pages WHERE job_id=$1',[id])).rows[0].records;
+  const enabled=await enablePilotProtocol(db,id);
+  assert.equal(enabled.enrichment_strategy,'protocol');assert.equal(enabled.state,'paused');
+  assert.equal((await db.query('SELECT manifest FROM history_jobs WHERE id=$1',[id])).rows[0].manifest.maxCalls,500);
+  await controlHistoryJob(db,id,'start');
+  await db.query('UPDATE history_jobs SET next_at=now() WHERE id=$1',[id]);
+  for(let i=0;i<20;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));
+  assert.equal(calls.filter(c=>c==='client').length,1,'modo novo não tenta novamente a consulta por cliente');
+  assert.equal(calls.filter(c=>c==='attendance').length,1,'página existente não é consultada novamente');
+  assert.equal(calls.filter(c=>c.startsWith('protocol:')).length,2,'cada atendimento é consultado uma vez, inclusive entre fluxos');
+  assert.deepEqual((await db.query("SELECT records FROM history_pages WHERE job_id=$1 AND stream='attendance'",[id])).rows[0].records,original);
+  assert.equal((await db.query('SELECT jsonb_array_length(records) AS n FROM history_clients WHERE job_id=$1',[id])).rows[0].n,0);
+  const cache=(await db.query("SELECT value FROM application_settings WHERE key LIKE $1",[`hubsoft_history_protocol:${id}:%`])).rows;
+  assert.equal(cache.length,2);assert.equal(JSON.stringify(cache).includes('do-not-persist'),false);
+  const records=(await db.query("SELECT payload FROM history_records WHERE job_id=$1 ORDER BY upstream_id",[id])).rows;
+  assert.deepEqual(records.map(r=>r.payload.usuario_abertura),['Beatriz','Carlos']);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  await assert.rejects(enablePilotProtocol(db,id),/ESTADO_NAO_PERMITE_EXCECAO/);
+}));
+
+test('piloto por protocolo rejeita identidade, cliente, data e campos inválidos antes de armazenar cache',async()=>fixture(async db=>{
+  const m={...structuredClone(manifest),peakDay:'2026-10-01',cutoff:'2026-10-01'};
+  const raw={...attendance,data_cadastro:'01/10/2026',ordem_servico_count:0};
+  const good={...raw,ordens_servico:[]};
+  const cases=[
+    [{...good,id_atendimento:999},'HUBSOFT_ATENDIMENTO_ID_DIVERGENTE'],
+    [{...good,protocolo:'999'},'HUBSOFT_PROTOCOLO_DIVERGENTE'],
+    [{...good,cliente:{codigo_cliente:999}},'HUBSOFT_CLIENTE_DIVERGENTE'],
+    [{...good,data_cadastro:'02/10/2026'},'HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE'],
+    [{...good,usuario_abertura:''},'HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES'],
+    [{...good,deleted_at:'2026-10-02'},'EXCLUSAO_EXIGE_RECONCILIACAO']
+  ];
+  for(const [response,error] of cases) {
+    const id=await createHistoryJob(db,m);
+    await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[id]);
+    await enablePilotProtocol(db,id);
+    await controlHistoryJob(db,id,'start');
+    const client={page:async()=>({records:[raw],complete:true}),attendanceDetail:async()=>response};
+    await historyStep(db,client,id);
+    const status=await historyStep(db,client,id);
+    assert.equal(status.state,'paused');assert.equal(status.error_code,error);
+    assert.equal((await db.query('SELECT count(*)::int AS n FROM application_settings WHERE key LIKE $1',[`hubsoft_history_protocol:${id}:%`])).rows[0].n,0);
+  }
+  const id=await createHistoryJob(db,m);
+  await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[id]);
+  await enablePilotProtocol(db,id);await controlHistoryJob(db,id,'start');
+  await db.query("INSERT INTO hubsoft_call_metrics(job_id,method,path,status,latency_ms) SELECT $1,'GET','/test',200,1 FROM generate_series(1,500)",[id]);
+  const status=await historyStep(db,{page:async()=>{throw new Error('must not fetch');}},id);
+  assert.equal(status.error_code,'ORCAMENTO_ATINGIDO');assert.equal(status.pages.pages,0);
 }));
