@@ -208,8 +208,8 @@ test('piloto retoma a página já salva por protocolo com cache próprio, sem ap
 
 test('piloto por protocolo rejeita identidade, cliente, data e campos inválidos antes de armazenar cache',async()=>fixture(async db=>{
   const m={...structuredClone(manifest),peakDay:'2026-10-01',cutoff:'2026-10-01'};
-  const raw={...attendance,data_cadastro:'01/10/2026',ordem_servico_count:0};
-  const good={...raw,ordens_servico:[]};
+  const raw={...attendance,data_cadastro:'01/10/2026',ordem_servico_count:0,usuario_abertura:null};
+  const good={...raw,usuario_abertura:'Beatriz',ordens_servico:[]};
   const cases=[
     [{...good,id_atendimento:999},'HUBSOFT_ATENDIMENTO_ID_DIVERGENTE'],
     [{...good,protocolo:'999'},'HUBSOFT_PROTOCOLO_DIVERGENTE'],
@@ -235,4 +235,38 @@ test('piloto por protocolo rejeita identidade, cliente, data e campos inválidos
   await db.query("INSERT INTO hubsoft_call_metrics(job_id,method,path,status,latency_ms) SELECT $1,'GET','/test',200,1 FROM generate_series(1,500)",[id]);
   const status=await historyStep(db,{page:async()=>{throw new Error('must not fetch');}},id);
   assert.equal(status.error_code,'ORCAMENTO_ATINGIDO');assert.equal(status.pages.pages,0);
+}));
+
+test('retomada completa campos pelo detalhe, preserva páginas concluídas e expõe somente diagnóstico seguro',async()=>fixture(async db=>{
+  const m={...structuredClone(manifest),peakDay:'2026-10-01',cutoff:'2026-10-01'};
+  const raw={...attendance,data_cadastro:'01/10/2026',usuario_abertura:null,descricao_abertura:null,tipo_atendimento:{id_tipo_atendimento:1},ordem_servico_count:0};
+  const detail={...raw,descricao_abertura:'Instalação confirmada',tipo_atendimento:'Instalação',usuario_abertura:'Beatriz',ordens_servico:[]};
+  const prior={...detail,id_atendimento:100,protocolo:'202610010000'};
+  const id=await createHistoryJob(db,m);
+  await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[id]);
+  await enablePilotProtocol(db,id);
+  await db.query("INSERT INTO history_pages(job_id,day,stream,page,records,complete,processed) VALUES($1,'2026-10-01','attendance',0,$2::jsonb,false,true),($1,'2026-10-01','attendance',1,$3::jsonb,true,false)",[id,JSON.stringify([prior]),JSON.stringify([raw])]);
+  await db.query("INSERT INTO history_records(job_id,month,kind,upstream_id,payload,origin) VALUES($1,'2026-10','attendance','100',$2::jsonb,'direct')",[id,JSON.stringify(prior)]);
+  await db.query("INSERT INTO history_followup_attendances(job_id,month,attendance_id,opened_on,observed_at,reported_orders,received_orders) VALUES($1,'2026-10','100','2026-10-01',now(),0,0)",[id]);
+  let fetched=0;
+  const client={page:async stream=>{assert.notEqual(stream,'attendance','páginas de atendimentos já estão salvas');return {records:[],complete:true};},attendanceDetail:async()=>{fetched++;return detail;}};
+  await controlHistoryJob(db,id,'start');
+  let status;
+  for(let i=0;i<15;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));assert.equal(fetched,1);
+  const saved=(await db.query("SELECT payload FROM history_records WHERE job_id=$1 AND upstream_id='101'",[id])).rows[0].payload;
+  assert.equal(saved.descricao_abertura,'Instalação confirmada');assert.equal(saved.tipo_atendimento,'Instalação');assert.equal(saved.usuario_abertura,'Beatriz');
+  assert.deepEqual((await db.query("SELECT payload FROM history_records WHERE job_id=$1 AND upstream_id='100'",[id])).rows[0].payload,prior);
+  assert.deepEqual((await db.query("SELECT records FROM history_pages WHERE job_id=$1 AND stream='attendance' AND page=1",[id])).rows[0].records,[raw]);
+  const failed=await createHistoryJob(db,m);
+  await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[failed]);
+  await enablePilotProtocol(db,failed);await controlHistoryJob(db,failed,'start');
+  const bad={page:async()=>({records:[raw],complete:true}),attendanceDetail:async()=>({...detail,descricao_abertura:null,tipo_atendimento:null})};
+  await historyStep(db,bad,failed);
+  const error=await historyStep(db,bad,failed);
+  assert.equal(error.state,'paused');assert.equal(error.error_code,'HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES');
+  assert.deepEqual(error.diagnostic,{kind:'attendance',missingFields:['descricao_abertura','tipo_atendimento'],invalidFields:[]});
+  const diagnostic=(await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_diagnostic:${failed}`])).rows[0].value;
+  assert.deepEqual(diagnostic,error.diagnostic);assert.equal(JSON.stringify(diagnostic).includes('Beatriz'),false);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
 }));
