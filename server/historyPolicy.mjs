@@ -19,7 +19,15 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   if(!['data_cadastro','data_inicio_programado','data_termino_executado'].includes(m.osDateField)) return fail('FILTRO_OS_INVALIDO');
   for(const reports of m.phase==='history'?monthsFor(m).map(month=>m.monthReports?.[month]):[m.reports]) for(const kind of ['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])]) {
     const report=reports?.[kind];
-    if(!report || typeof report.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(report.fileSha256)||!report.filters||typeof report.filters!=='object'||!report.exportedAt) return fail('RELATORIOS_OBRIGATORIOS');
+    const pending=kind==='followup'&&m.phase==='day'&&report?.pending===true&&!m.autoPublish;
+    if(report?.pending===true&&!pending) return fail('REFERENCIA_PENDENTE_NAO_PERMITIDA');
+    if(!pending && (!report || typeof report.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(report.fileSha256)||!report.filters||typeof report.filters!=='object'||!report.exportedAt)) return fail('RELATORIOS_OBRIGATORIOS');
+    if(!report?.filters) return fail('RELATORIOS_OBRIGATORIOS');
+    const identities=kind==='attendance'?['id_atendimento','protocolo']:['id_ordem_servico','numero_ordem_servico'];
+    if(report.keyField!==undefined&&!identities.includes(report.keyField)) return fail('CAMPO_IDENTIDADE_INVALIDO');
+    if(report.keys!==undefined&&(!Array.isArray(report.keys)||report.keys.length>50000||new Set(report.keys.map(exactId)).size!==report.keys.length)) return fail('CHAVES_RELATORIO_DUPLICADAS');
+    if(report.filters.addressType!==undefined&&report.filters.addressType!=='instalacao') return fail('TIPO_ENDERECO_NAO_MAPEADO');
+    if(report.exportFilters?.dateField!==undefined&&!['data_cadastro','data_fechamento','data_inicio_programado','data_termino_executado'].includes(report.exportFilters.dateField)) return fail('CAMPO_DATA_EXPORTACAO_INVALIDO');
     if(report.filters.otherFilters!=='none') return fail('FILTROS_ADICIONAIS_EXIGEM_MAPEAMENTO');
     const expected=kind==='serviceOrders'?m.osDateField:'data_cadastro';
     if(kind==='followup' && (report.filters.followupCutoff!==m.followupCutoff||report.filters.relationship!=='id_atendimento')) return fail('FILTRO_ACOMPANHAMENTO_INVALIDO');
@@ -27,7 +35,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   }
   if(!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>100000) return fail('ORCAMENTO_OBRIGATORIO');
   if(m.window && (!/^\d{2}:\d{2}$/.test(m.window.start??'')||!/^\d{2}:\d{2}$/.test(m.window.end??'')||m.window.start===m.window.end||[m.window.start,m.window.end].some(v=>+v.slice(0,2)>23||+v.slice(3)>59))) return fail('JANELA_INVALIDA');
-  if(m.autoPublish && (m.phase!=='history'||!m.reviewer||monthsFor(m).some(month=>['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])].some(kind=>!Array.isArray(m.monthReports?.[month]?.[kind]?.ids))))) return fail('EVIDENCIAS_MENSAIS_OBRIGATORIAS');
+  if(m.autoPublish && (m.phase!=='history'||!m.reviewer||monthsFor(m).some(month=>['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])].some(kind=>(!Array.isArray(m.monthReports?.[month]?.[kind]?.ids)&&!Array.isArray(m.monthReports?.[month]?.[kind]?.keys)))))) return fail('EVIDENCIAS_MENSAIS_OBRIGATORIAS');
   if(m.phase==='day' && (!/^2026-10-\d{2}$/.test(m.peakDay??'')||m.peakDay>m.cutoff)) return fail('DIA_PILOTO_INVALIDO');
   if(m.phase==='day' && new Date(m.peakDay+'T12:00:00Z').toISOString().slice(0,10)!==m.peakDay) return fail('DIA_PILOTO_INVALIDO');
   if(m.phase==='october' && (m.cutoff<'2026-10-31'||today<='2026-10-31')) return fail('OUTUBRO_AINDA_ABERTO');

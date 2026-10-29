@@ -9,6 +9,7 @@ const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth}=await
 const {followupReport,orderDate,followupOrder}=await import('../historyFollowup.mjs');
 const {validateManifest}=await import('../historyPolicy.mjs');
 const {rebuild}=await import('../records.mjs');
+const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
 
 const report=(hash,dateField)=>({fileSha256:hash.repeat(64),exportedAt:'2026-10-28T10:00:00Z',filters:{dateField,otherFilters:'none'}});
 const manifest={year:2026,phase:'day',peakDay:'2026-10-15',cutoff:'2026-10-15',followupCutoff:'2026-10-27',osDateField:'data_termino_executado',maxCalls:500,
@@ -139,4 +140,34 @@ test('conclusão sem programação pode entrar; OS sem conclusão não recebe um
   assert.equal((await db.query("SELECT count(*)::int AS n FROM commercial_records WHERE kind='serviceOrders'")).rows[0].n,3);
   const missing=fakeClient();missing.page=async(stream)=>({records:stream==='serviceOrderCompletions'?[pending]:[],complete:true});
   assert.equal((await collect(db,missing)).status.error_code,'HUBSOFT_OS_CONCLUSAO_AUSENTE');
+}));
+
+test('conferência por planilha é local, mantém IDs canônicos e não publica escopo divergente ou referência pendente',async()=>fixture(async db=>{
+  const {id,status}=await collect(db,fakeClient());
+  assert.equal(status.state,'awaiting_validation');
+  const refs=structuredClone(manifest.reports);
+  refs.attendance.keyField='protocolo';refs.attendance.keys=['202610150001','202610150002'];
+  refs.serviceOrders.keyField='numero_ordem_servico';refs.serviceOrders.keys=['204','205','206'];
+  refs.serviceOrders.exportFilters={dateField:'data_cadastro'};
+  refs.followup={pending:true,filters:structuredClone(refs.followup.filters)};
+  const partial=await attachHistoryReports(db,id,refs);
+  assert.equal(partial.publishable,false);
+  assert.equal(partial.reports.attendance.status,'matched');
+  assert.equal(partial.reports.serviceOrders.blocker,'ESCOPO_RELATORIO_NAO_COMPARAVEL');
+  assert.equal(partial.reports.followup.blocker,'REFERENCIA_ACOMPANHAMENTO_PENDENTE');
+  const proof={...evidence,attendance:{reportSha256:refs.attendance.fileSha256,keys:refs.attendance.keys},serviceOrders:{reportSha256:refs.serviceOrders.fileSha256,keys:refs.serviceOrders.keys}};
+  await assert.rejects(approveHistoryMonth(db,id,proof),/ACOMPANHAMENTO_PENDENTE/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  refs.followup={...manifest.reports.followup,keyField:'numero_ordem_servico',keys:evidence.followup.ids};
+  await attachHistoryReports(db,id,refs);
+  await assert.rejects(approveHistoryMonth(db,id,{...proof,followup:{reportSha256:refs.followup.fileSha256,keys:refs.followup.keys}}),/ESCOPO_RELATORIO/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  refs.serviceOrders.exportFilters.dateField='data_termino_executado';
+  await attachHistoryReports(db,id,refs);
+  const result=await historyReconciliation(db,id);
+  assert.equal(result.publishable,true);
+  assert.deepEqual(result.reports.attendance.mapping.map(r=>r.id),['101','102']);
+  await approveHistoryMonth(db,id,{...proof,followup:{reportSha256:refs.followup.fileSha256,keys:refs.followup.keys}});
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,5);
+  await assert.rejects(attachHistoryReports(db,id,refs),/ESTADO_NAO_PERMITE/);
 }));

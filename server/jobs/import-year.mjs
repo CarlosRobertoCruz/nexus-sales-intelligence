@@ -1,10 +1,10 @@
 import { readFile,writeFile } from 'node:fs/promises';
 import { validateManifest,monthsFor,daysFor } from '../historyPolicy.mjs';
 const [action='help',argument,evidenceFile]=process.argv.slice(2);
-const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup'];
+const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','reconcile','attach-reports'];
 let pool;
 try {
-  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup UUID arquivo.json'); }
+  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; attach-reports UUID referencias.json'); }
   else if(!commands.includes(action)||!argument) throw new Error('COMANDO_INVALIDO');
   else if(action==='plan') {
     const manifest=validateManifest(JSON.parse(await readFile(argument,'utf8')));
@@ -16,6 +16,12 @@ try {
     else {
       if(!/^[a-f\d-]{36}$/i.test(argument)) throw new Error('ID_CARGA_INVALIDO');
       if(action==='status') console.log(JSON.stringify(await historyStatus(pool,argument),null,2));
+      else if(action==='reconcile'||action==='attach-reports') {
+        const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
+        const result=action==='reconcile'?await historyReconciliation(pool,argument):await attachHistoryReports(pool,argument,JSON.parse(await readFile(evidenceFile,'utf8')));
+        if(action==='reconcile'&&evidenceFile) await writeFile(evidenceFile,JSON.stringify(result,null,2),{mode:0o600});
+        else console.log(JSON.stringify(result,null,2));
+      }
       else if(['start','pause','cancel'].includes(action)) {
         if(action==='start' && (process.env.HUBSOFT_HISTORY_ENABLED!=='true'||process.env.HUBSOFT_HISTORY_IP_COORDINATED!=='true')) throw new Error('CARGA_HISTORICA_DESATIVADA');
         console.log(JSON.stringify(await controlHistoryJob(pool,argument,action),null,2));
@@ -49,9 +55,9 @@ try {
             if(job.phase==='history' && job.manifest.autoPublish) {
               const month=monthsFor(job.manifest)[job.month_index],reports=job.manifest.monthReports[month];
               await approveHistoryMonth(pool,argument,{month,reviewer:job.manifest.reviewer,confirmFilters:true,
-                attendance:{ids:reports.attendance.ids,reportSha256:reports.attendance.fileSha256},
-                serviceOrders:{ids:reports.serviceOrders.ids,reportSha256:reports.serviceOrders.fileSha256},
-                ...(job.manifest.followupCutoff?{followup:{ids:reports.followup.ids,reportSha256:reports.followup.fileSha256}}:{})});
+                attendance:{keys:reports.attendance.keys,ids:reports.attendance.ids,reportSha256:reports.attendance.fileSha256},
+                serviceOrders:{keys:reports.serviceOrders.keys,ids:reports.serviceOrders.ids,reportSha256:reports.serviceOrders.fileSha256},
+                ...(job.manifest.followupCutoff?{followup:{keys:reports.followup.keys,ids:reports.followup.ids,reportSha256:reports.followup.fileSha256}}:{})});
               continue;
             }
           }

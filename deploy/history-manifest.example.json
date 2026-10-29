@@ -1,8 +1,8 @@
 {
   "year": 2026,
   "phase": "day",
-  "peakDay": "2026-10-15",
-  "cutoff": "2026-10-15",
+  "peakDay": "2026-10-01",
+  "cutoff": "2026-10-01",
   "osDateField": "data_termino_executado",
   "maxCalls": 500,
   "reports": {
@@ -29,9 +29,9 @@
         "dateField": "data_cadastro",
         "otherFilters": "none",
         "relationship": "id_atendimento",
-        "followupCutoff": "SUBSTITUA_PELO_CORTE_DO_ACOMPANHAMENTO"
+        "followupCutoff": "2026-10-28"
       }
     }
   },
-  "followupCutoff": "SUBSTITUA_PELO_CORTE_DO_ACOMPANHAMENTO"
+  "followupCutoff": "2026-10-28"
 }

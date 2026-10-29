@@ -1,4 +1,5 @@
 import {exactId, localDay} from './historyPolicy.mjs';
+import {compareHistoryReport} from './historyReconciliation.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const dates=['data_cadastro','data_inicio_programado','data_inicio_executado','data_termino_executado'];
@@ -103,15 +104,16 @@ export async function followupReport(db,jobId,{publishedOnly=false}={}) {
 }
 
 export async function publishFollowups(db,jobId,month,cutoff,evidence,report) {
-  if(!evidence||evidence.reportSha256!==report?.fileSha256||!Array.isArray(evidence.ids)) return fail('EVIDENCIA_ACOMPANHAMENTO_INVALIDA');
+  if(report?.pending) return fail('REFERENCIA_ACOMPANHAMENTO_PENDENTE');
+  if(!evidence||evidence.reportSha256!==report?.fileSha256) return fail('EVIDENCIA_ACOMPANHAMENTO_INVALIDA');
   const parents=(await db.query('SELECT attendance_id FROM history_followup_attendances WHERE job_id=$1 AND month=$2',[jobId,month])).rows;
   const selected=(await db.query("SELECT upstream_id FROM history_records WHERE job_id=$1 AND month=$2 AND kind='attendance'",[jobId,month])).rows;
   const selectedIds=new Set(selected.map(r=>r.upstream_id));
   if(parents.length!==selectedIds.size||parents.some(r=>!selectedIds.has(r.attendance_id))) return fail('ACOMPANHAMENTO_INCOMPLETO');
-  const wanted=new Set(evidence.ids.map(exactId));
-  const actual=(await db.query(`SELECT o.order_id FROM history_followup_orders o JOIN history_followup_attendances a
+  const actual=(await db.query(`SELECT o.order_id AS upstream_id,o.payload FROM history_followup_orders o JOIN history_followup_attendances a
     ON a.job_id=o.job_id AND a.attendance_id=o.attendance_id WHERE o.job_id=$1 AND a.month=$2`,[jobId,month])).rows;
-  if(wanted.size!==actual.length||actual.some(row=>!wanted.has(row.order_id))) return fail('RECONCILIACAO_ACOMPANHAMENTO_DIVERGENTE');
+  const comparison=compareHistoryReport('serviceOrders',actual,evidence,report);
+  if(comparison.status!=='matched') return fail('RECONCILIACAO_ACOMPANHAMENTO_DIVERGENTE');
   await db.query(`INSERT INTO attendance_followup_snapshots(attendance_id,cutoff,opened_on,observed_at,job_id)
     SELECT attendance_id,$3::date,opened_on,observed_at,job_id FROM history_followup_attendances WHERE job_id=$1 AND month=$2
     ON CONFLICT(attendance_id,cutoff) DO UPDATE SET observed_at=excluded.observed_at,job_id=excluded.job_id`,[jobId,month,cutoff]);
