@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import {mergeAttendanceDetail} from './historyAttendanceDetail.mjs';
+import {safeHubsoftDiagnostic,HubsoftMappingError} from './hubsoftDiagnostics.mjs';
 import {compareHistoryReport} from './historyReconciliation.mjs';
 import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt,usesProtocolPilot } from './historyPolicy.mjs';
 import { normalizeHubsoft } from './hubsoftAdapter.mjs';
@@ -35,7 +37,9 @@ export async function historyStatus(db,id) {
     (SELECT count(*)::int FROM history_followup_attendances WHERE job_id=$1) AS attendances,
     (SELECT count(*)::int FROM history_followup_orders WHERE job_id=$1) AS linked_orders,
     (SELECT max(observed_at) FROM history_followup_attendances WHERE job_id=$1) AS last_observed_at`,[id])).rows[0] : undefined;
-  return {...job,totals,pages,calls,...(followup ? {followup} : {})};
+  const savedDiagnostic=job.error_code?(await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_diagnostic:${id}`])).rows[0]?.value:undefined;
+  const diagnostic=savedDiagnostic?safeHubsoftDiagnostic(new HubsoftMappingError(job.error_code,savedDiagnostic.kind,savedDiagnostic.missingFields,savedDiagnostic.invalidFields)):undefined;
+  return {...job,totals,pages,calls,...(followup ? {followup} : {}),...(diagnostic ? {diagnostic} : {})};
 }
 export async function controlHistoryJob(db,id,action) {
   const state=action==='pause'?'paused':action==='cancel'?'cancelled':action==='start'?'running':null;
@@ -48,13 +52,13 @@ function businessDay(kind,record,manifest) {
   return localDay(kind==='attendance'?record.data_cadastro:record[manifest.osDateField],kind!=='attendance');
 }
 function clientCode(raw) { return raw.cliente?.codigo_cliente??raw.cliente_servico?.cliente?.codigo_cliente??raw.codigo_cliente; }
-function validateProtocolDetail(raw,detail,customer,created) {
+function normalizedAttendanceDetail(raw,detail,customer,created) {
   if(!detail||exactId(detail.id_atendimento)!==exactId(raw.id_atendimento)) throw codeError('HUBSOFT_ATENDIMENTO_ID_DIVERGENTE');
   if(String(detail.protocolo)!==exactId(raw.protocolo)) throw codeError('HUBSOFT_PROTOCOLO_DIVERGENTE');
   if(exactId(clientCode(detail))!==customer) throw codeError('HUBSOFT_CLIENTE_DIVERGENTE');
   if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
   if(detail.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
-  normalized('attendance',{...raw,usuario_abertura:detail.usuario_abertura??raw.usuario_abertura});
+  return normalized('attendance',mergeAttendanceDetail(raw,detail));
 }
 function normalized(kind,raw) {
   const row=kind==='serviceOrders' ? normalizeHubsoft(kind,orderDates(raw),{},{requireScheduled:false}) : normalizeHubsoft(kind,raw);
@@ -110,7 +114,7 @@ export async function historyStep(pool,client,id) {
         let needsDetail=kind==='attendance' && Boolean(m.followupCutoff);
         if(kind==='attendance'&&!needsDetail) {
           try {normalized(kind,raw);}
-          catch(error) {if(!error.diagnostic?.missingFields?.includes('usuario_abertura'))throw error;needsDetail=true;}
+          catch(error) {if(!error.diagnostic?.missingFields?.some(field=>['usuario_abertura','descricao_abertura','tipo_atendimento'].includes(field)))throw error;needsDetail=true;}
         }
         if(needsDetail) {
           const customer=exactId(clientCode(raw));
@@ -120,11 +124,11 @@ export async function historyStep(pool,client,id) {
             const key=`hubsoft_history_protocol:${id}:${exactId(raw.id_atendimento)}`;
             const saved=(await db.query('SELECT value FROM application_settings WHERE key=$1',[key])).rows[0]?.value;
             if(saved) {
-              validateProtocolDetail(raw,saved.record,customer,created);
+              normalizedAttendanceDetail(raw,saved.record,customer,created);
               cache={records:[saved.record],captured_at:saved.observedAt};
             } else {
               const response=await client.attendanceDetail(exactId(raw.protocolo));
-              validateProtocolDetail(raw,response,customer,created);
+              normalizedAttendanceDetail(raw,response,customer,created);
               const value={record:projectHistoryRecord(response),observedAt:new Date().toISOString()};
               await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[key,JSON.stringify(value)]);
               return historyStatus(db,id);
@@ -142,7 +146,7 @@ export async function historyStep(pool,client,id) {
           detail=match[0];
           if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
         }
-        const row=normalized(kind,detail?{...raw,usuario_abertura:detail.usuario_abertura??raw.usuario_abertura}:raw);
+        const row=detail?normalizedAttendanceDetail(raw,detail,exactId(clientCode(raw)),localDay(normalizeDate(raw.data_cadastro_br??raw.data_cadastro))):normalized(kind,raw);
         rows.push({kind,payload:row,origin:'direct'});
         if(kind==='attendance') {
           if(m.followupCutoff) {
@@ -188,6 +192,10 @@ export async function historyStep(pool,client,id) {
     return historyStatus(db,id);
   } catch(error) {
     if(!locked) throw error;
+    const diagnostic=safeHubsoftDiagnostic(error);
+    const diagnosticKey=`hubsoft_history_diagnostic:${id}`;
+    if(diagnostic) await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[diagnosticKey,JSON.stringify(diagnostic)]);
+    else await db.query('DELETE FROM application_settings WHERE key=$1',[diagnosticKey]);
     const transient=['HUBSOFT_LIMITE_AGUARDE','HUBSOFT_FILA_OCUPADA','HUBSOFT_CONEXAO_OU_TIMEOUT','HUBSOFT_AUTENTICACAO'].includes(error.code)||/^HUBSOFT_HTTP_5/.test(error.code??'');
     const attempts=Number((await db.query('SELECT attempts FROM history_jobs WHERE id=$1',[id])).rows[0]?.attempts??0)+1;
     const retry=transient&&attempts<3;

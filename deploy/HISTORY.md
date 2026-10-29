@@ -59,6 +59,16 @@ Somente jobs planejados, pausados ou aguardando validação aceitam essa operaç
 
 ## Exceção autorizada para o piloto de 01/10
 
+### Campos ausentes na listagem
+
+O diagnóstico real da terceira página mostrou descrição de abertura e tipo de atendimento ausentes nas posições 3, 4 e 5, além do nome de abertura ainda não resolvido. A implementação anterior aproveitava somente o nome da consulta detalhada. O complemento passa a preencher `descricao_abertura` e `tipo_atendimento` quando faltam na listagem e estão presentes no detalhe. O nome de abertura vem do detalhe quando informado; um complemento vazio não apaga um nome válido já recebido na listagem.
+
+Antes de aproveitar qualquer campo, validar ID, protocolo, código do cliente, dia de abertura e exclusão. Preservar descrição e tipo já preenchidos na listagem, além de IDs, datas e relações originais. Um objeto de tipo que contém somente o ID, sem nome/descrição, não equivale a um tipo textual resolvido. Se as duas fontes estiverem incompletas, pausar sem inventar valores nem usar o responsável como autor.
+
+O detalhe minimizado continua no cache por atendimento. A página recebida é preservada sem edição; o registro normalizado recebe os campos complementados. Na retomada, os complementos já válidos e as páginas concluídas não são consultados novamente. Não limpar o job, o cache nem o checkpoint para aplicar esta correção.
+
+Quando houver falha de mapeamento, o status passa a incluir `diagnostic`, somente com `kind`, `missingFields` e `invalidFields`, filtrados pela lista permitida. Esse resumo também fica em `application_settings` sob `hubsoft_history_diagnostic:JOB`, sem nomes, IDs de registros, descrições, tokens ou corpo de resposta. Ele só é exibido enquanto o job tem erro; uma nova falha sem diagnóstico de mapeamento remove o resumo anterior para evitar informação desatualizada. A correção exige reconstruir somente API, sem migração nova, nova autorização da exceção ou reenvio do manifesto.
+
 Autorizada pelo usuário em 29/10/2026 após os diagnósticos reais: a consulta por cliente e dia retornou uma lista vazia, inclusive com `tipo_data=data_cadastro` explícito. A busca exata por protocolo retornou um atendimento com ID, protocolo, código de cliente e dia iguais aos da listagem, além do nome de abertura e da lista de OS. A causa interna dessa diferença na Hubsoft não foi determinada. O teste com horários explícitos foi recusado e não foi incorporado ao importador.
 
 O padrão permanece consulta por cliente. A exceção é somente para a fase `day`, dia `2026-10-01`, por ativação explícita do job pausado. Não é uma tentativa automática depois de uma busca vazia e não se aplica a outubro completo ou janeiro-setembro. O usuário autorizou substituir a estratégia nesse piloto: pelos relatórios, cerca de 107 consultas de detalhe em vez de 93 por cliente, sem tentar novamente cada cliente antes de cada protocolo.
