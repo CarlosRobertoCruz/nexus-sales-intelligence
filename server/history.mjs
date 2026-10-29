@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import {compareHistoryReport} from './historyReconciliation.mjs';
 import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt } from './historyPolicy.mjs';
 import { normalizeHubsoft } from './hubsoftAdapter.mjs';
 import { upsertRows,rebuild } from './records.mjs';
@@ -187,12 +188,13 @@ export async function approveHistoryMonth(pool,id,evidence) {
     if(evidence.month!==month || !evidence.reviewer || evidence.confirmFilters!==true) throw codeError('EVIDENCIA_INVALIDA');
     const rows=(await db.query('SELECT kind,upstream_id,payload FROM history_records WHERE job_id=$1 AND month=$2',[id,month])).rows;
     const reports=job.phase==='history'?job.manifest.monthReports[month]:job.manifest.reports;
+    if(job.manifest.followupCutoff&&reports.followup.pending) throw codeError('REFERENCIA_ACOMPANHAMENTO_PENDENTE');
     for(const kind of ['attendance','serviceOrders']) {
       const supplied=evidence[kind];
-      if(!supplied||supplied.reportSha256!==reports[kind].fileSha256||!Array.isArray(supplied.ids)) throw codeError('EVIDENCIA_INVALIDA');
-      const actual=new Set(rows.filter(row=>row.kind===kind).map(row=>row.upstream_id));
-      const expected=new Set(supplied.ids.map(exactId));
-      if(actual.size!==expected.size||[...actual].some(key=>!expected.has(key))) throw codeError('RECONCILIACAO_DIVERGENTE');
+      const comparison=compareHistoryReport(kind,rows.filter(row=>row.kind===kind),supplied,reports[kind]);
+      if(comparison.ambiguous.length) throw codeError('IDENTIDADE_RELATORIO_AMBIGUA');
+      if(comparison.blocker) throw codeError(comparison.blocker);
+      if(comparison.status!=='matched') throw codeError('RECONCILIACAO_DIVERGENTE');
       await upsertRows(db,kind,rows.filter(row=>row.kind===kind).map(row=>row.payload),'hubsoft');
     }
     const followup=job.manifest.followupCutoff ? await publishFollowups(db,id,month,job.manifest.followupCutoff,evidence.followup,reports.followup) : undefined;
