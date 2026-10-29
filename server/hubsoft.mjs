@@ -189,6 +189,17 @@ export class HubsoftClient {
     });
     this.queue=task.catch(()=>{}); return task;
   }
+  attendanceDetail(protocol) {
+    const task=this.queue.then(async()=>{
+      if(typeof protocol!=='string'||!/^\d{1,40}$/.test(protocol)) throw new HubsoftError('PROTOCOLO_INVALIDO');
+      await this.authenticate();
+      const data=await this.request('GET','/api/v1/integracao/cliente/atendimento',{protocol},this.token);
+      if(!Array.isArray(data.atendimentos)||data.atendimentos.length!==1||String(data.atendimentos[0]?.protocolo)!==protocol)
+        throw new HubsoftError('HUBSOFT_PROTOCOLO_DIVERGENTE');
+      return data.atendimentos[0];
+    });
+    this.queue=task.catch(()=>{});return task;
+  }
   attendanceOpener(protocol) {
     const task = this.queue.then(async () => {
       if (typeof protocol !== "string" || !/^\d{1,40}$/.test(protocol))

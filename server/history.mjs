@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {compareHistoryReport} from './historyReconciliation.mjs';
-import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt } from './historyPolicy.mjs';
+import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt,usesProtocolPilot } from './historyPolicy.mjs';
 import { normalizeHubsoft } from './hubsoftAdapter.mjs';
 import { upsertRows,rebuild } from './records.mjs';
 import { projectHistoryRecord } from './historyProjection.mjs';
@@ -24,7 +24,7 @@ export async function createHistoryJob(db,manifest) {
   return id;
 }
 export async function historyStatus(db,id) {
-  const job=(await db.query("SELECT id,phase,state,month_index,next_at,error_code,approved,(manifest ? 'followupCutoff') AS has_followup FROM history_jobs WHERE id=$1",[id])).rows[0];
+  const job=(await db.query("SELECT id,phase,state,month_index,next_at,error_code,approved,(manifest ? 'followupCutoff') AS has_followup,COALESCE(manifest->>'enrichmentStrategy','client') AS enrichment_strategy FROM history_jobs WHERE id=$1",[id])).rows[0];
   if(!job) throw codeError('CARGA_NAO_ENCONTRADA');
   const totals=(await db.query('SELECT kind,count(*)::int AS unique_records FROM history_records WHERE job_id=$1 GROUP BY kind',[id])).rows;
   const pages=(await db.query('SELECT count(*)::int AS pages,count(*) FILTER(WHERE processed)::int AS processed FROM history_pages WHERE job_id=$1',[id])).rows[0];
@@ -48,6 +48,14 @@ function businessDay(kind,record,manifest) {
   return localDay(kind==='attendance'?record.data_cadastro:record[manifest.osDateField],kind!=='attendance');
 }
 function clientCode(raw) { return raw.cliente?.codigo_cliente??raw.cliente_servico?.cliente?.codigo_cliente??raw.codigo_cliente; }
+function validateProtocolDetail(raw,detail,customer,created) {
+  if(!detail||exactId(detail.id_atendimento)!==exactId(raw.id_atendimento)) throw codeError('HUBSOFT_ATENDIMENTO_ID_DIVERGENTE');
+  if(String(detail.protocolo)!==exactId(raw.protocolo)) throw codeError('HUBSOFT_PROTOCOLO_DIVERGENTE');
+  if(exactId(clientCode(detail))!==customer) throw codeError('HUBSOFT_CLIENTE_DIVERGENTE');
+  if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
+  if(detail.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
+  normalized('attendance',{...raw,usuario_abertura:detail.usuario_abertura??raw.usuario_abertura});
+}
 function normalized(kind,raw) {
   const row=kind==='serviceOrders' ? normalizeHubsoft(kind,orderDates(raw),{},{requireScheduled:false}) : normalizeHubsoft(kind,raw);
   if(kind==='attendance') { row.data_cadastro=row.data_cadastro.split(' ')[0]; row.date_precision='day'; }
@@ -65,6 +73,8 @@ export async function historyStep(pool,client,id) {
     if(!job) throw codeError('CARGA_NAO_ENCONTRADA');
     if(job.state!=='running'||new Date(job.next_at).getTime()>Date.now()) return historyStatus(db,id);
     const m=job.manifest,month=monthsFor(m)[job.month_index];
+    const protocolMode=usesProtocolPilot(m,id);
+    if(protocolMode&&client.gate?.interval!==undefined&&client.gate.interval!==1000) throw codeError('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
     if(!month) return historyStatus(db,id);
     const windowAt=nextWindowAt(m.window);
     if(windowAt>Date.now()+1000) {await db.query('UPDATE history_jobs SET next_at=$2 WHERE id=$1',[id,new Date(windowAt)]);return historyStatus(db,id);}
@@ -106,11 +116,26 @@ export async function historyStep(pool,client,id) {
           const customer=exactId(clientCode(raw));
           const created=localDay(normalizeDate(raw.data_cadastro_br??raw.data_cadastro));
           if(!selectedDays.has(created)) continue;
-          cache=(await db.query('SELECT * FROM history_clients WHERE job_id=$1 AND client_code=$2 AND day=$3',[id,customer,created])).rows[0];
-          if(!cache) {
-            const response=await client.clientAttendances(customer,created);
-            await db.query('INSERT INTO history_clients(job_id,client_code,day,records) VALUES($1,$2,$3,$4::jsonb)',[id,customer,created,JSON.stringify(response.map(r=>projectHistoryRecord(r)))]);
-            return historyStatus(db,id);
+          if(protocolMode) {
+            const key=`hubsoft_history_protocol:${id}:${exactId(raw.id_atendimento)}`;
+            const saved=(await db.query('SELECT value FROM application_settings WHERE key=$1',[key])).rows[0]?.value;
+            if(saved) {
+              validateProtocolDetail(raw,saved.record,customer,created);
+              cache={records:[saved.record],captured_at:saved.observedAt};
+            } else {
+              const response=await client.attendanceDetail(exactId(raw.protocolo));
+              validateProtocolDetail(raw,response,customer,created);
+              const value={record:projectHistoryRecord(response),observedAt:new Date().toISOString()};
+              await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[key,JSON.stringify(value)]);
+              return historyStatus(db,id);
+            }
+          } else {
+            cache=(await db.query('SELECT * FROM history_clients WHERE job_id=$1 AND client_code=$2 AND day=$3',[id,customer,created])).rows[0];
+            if(!cache) {
+              const response=await client.clientAttendances(customer,created);
+              await db.query('INSERT INTO history_clients(job_id,client_code,day,records) VALUES($1,$2,$3,$4::jsonb)',[id,customer,created,JSON.stringify(response.map(r=>projectHistoryRecord(r)))]);
+              return historyStatus(db,id);
+            }
           }
           const match=cache.records.filter(item=>String(item.id_atendimento)===exactId(raw.id_atendimento));
           if(match.length!==1) throw codeError('HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO');
@@ -207,4 +232,24 @@ export async function approveHistoryMonth(pool,id,evidence) {
     return historyStatus(db,id);
   } catch(error) { await db.query('ROLLBACK'); throw error; }
   finally { try {if(locked) await db.query('SELECT pg_advisory_unlock(73190602)');} finally {db.release();} }
+}
+
+// Records explicit operator approval without starting the worker or clearing caches.
+export async function enablePilotProtocol(pool,id) {
+  const db=await pool.connect();let locked=false;
+  try {
+    locked=(await db.query('SELECT pg_try_advisory_lock(73190602) AS locked')).rows[0].locked;
+    if(!locked) throw codeError('SINCRONIZACAO_EM_ANDAMENTO');
+    await db.query('BEGIN');
+    const job=(await db.query('SELECT * FROM history_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if(job?.state!=='paused'||job.phase!=='day'||job.manifest.peakDay!=='2026-10-01') throw codeError('ESTADO_NAO_PERMITE_EXCECAO');
+    if(job.manifest.enrichmentStrategy!=='protocol'&&job.error_code!=='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO') throw codeError('ERRO_NAO_PERMITE_EXCECAO');
+    const manifest={...job.manifest,enrichmentStrategy:'protocol',protocolException:{enabled:true,jobId:id,day:job.manifest.peakDay,authorizedAt:new Date().toISOString()}};
+    validateManifest(manifest);
+    usesProtocolPilot(manifest,id);
+    await db.query('UPDATE history_jobs SET manifest=$2::jsonb,updated_at=now() WHERE id=$1',[id,JSON.stringify(manifest)]);
+    await db.query('COMMIT');
+    return await historyStatus(db,id);
+  } catch(error) {await db.query('ROLLBACK');throw error;}
+  finally {try{if(locked)await db.query('SELECT pg_advisory_unlock(73190602)');}finally{db.release();}}
 }

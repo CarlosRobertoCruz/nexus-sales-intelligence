@@ -1,21 +1,25 @@
 import { readFile,writeFile } from 'node:fs/promises';
 import { validateManifest,monthsFor,daysFor } from '../historyPolicy.mjs';
 const [action='help',argument,evidenceFile]=process.argv.slice(2);
-const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','reconcile','attach-reports'];
+const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','reconcile','attach-reports','enable-pilot-protocol'];
 let pool;
 try {
-  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; attach-reports UUID referencias.json'); }
+  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; attach-reports UUID referencias.json; enable-pilot-protocol UUID'); }
   else if(!commands.includes(action)||!argument) throw new Error('COMANDO_INVALIDO');
   else if(action==='plan') {
     const manifest=validateManifest(JSON.parse(await readFile(argument,'utf8')));
     console.log(JSON.stringify({phase:manifest.phase,cutoff:manifest.cutoff,months:monthsFor(manifest),days:monthsFor(manifest).reduce((n,month)=>n+daysFor(manifest,month).length,0),maximumCalls:manifest.maxCalls,osDateField:manifest.osDateField,followupCutoff:manifest.followupCutoff??null,enabled:false},null,2));
   } else {
     ({pool}=await import('../db.mjs'));
-    const {createHistoryJob,historyStatus,controlHistoryJob,historyStep,approveHistoryMonth}=await import('../history.mjs');
+    const {createHistoryJob,historyStatus,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
     if(action==='create') console.log(JSON.stringify({id:await createHistoryJob(pool,JSON.parse(await readFile(argument,'utf8')))}));
     else {
       if(!/^[a-f\d-]{36}$/i.test(argument)) throw new Error('ID_CARGA_INVALIDO');
       if(action==='status') console.log(JSON.stringify(await historyStatus(pool,argument),null,2));
+      else if(action==='enable-pilot-protocol') {
+        if(process.env.HUBSOFT_HISTORY_ENABLED!=='true'||process.env.HUBSOFT_HISTORY_IP_COORDINATED!=='true'||Number(process.env.HUBSOFT_REQUESTS_PER_SECOND??1)!==1) throw new Error('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
+        console.log(JSON.stringify(await enablePilotProtocol(pool,argument),null,2));
+      }
       else if(action==='reconcile'||action==='attach-reports') {
         const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
         const result=action==='reconcile'?await historyReconciliation(pool,argument):await attachHistoryReports(pool,argument,JSON.parse(await readFile(evidenceFile,'utf8')));

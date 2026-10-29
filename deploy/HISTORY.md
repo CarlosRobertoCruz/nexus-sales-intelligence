@@ -57,6 +57,33 @@ dc run --rm --no-deps -v /diretorio/restrito:/entrada:ro history attach-reports 
 
 Somente jobs planejados, pausados ou aguardando validação aceitam essa operação, protegida pelo lock da carga. Ela altera somente referências, nunca período, limite, campo de data ou dados coletados. Referências novas precisam conter hashes e listas obtidos das fontes corretas. A lista da evidência de aprovação usa `keys` quando `keyField` é um número de negócio; a conversão para IDs ocorre automaticamente na validação. A aprovação continua explícita e transacional. Para esta atualização, reconstruir API; não há nova migração além da `003` já aplicada. As flags reais de carga permanecem sob controle do operador e não são habilitadas no deploy.
 
+## Exceção autorizada para o piloto de 01/10
+
+Autorizada pelo usuário em 29/10/2026 após os diagnósticos reais: a consulta por cliente e dia retornou uma lista vazia, inclusive com `tipo_data=data_cadastro` explícito. A busca exata por protocolo retornou um atendimento com ID, protocolo, código de cliente e dia iguais aos da listagem, além do nome de abertura e da lista de OS. A causa interna dessa diferença na Hubsoft não foi determinada. O teste com horários explícitos foi recusado e não foi incorporado ao importador.
+
+O padrão permanece consulta por cliente. A exceção é somente para a fase `day`, dia `2026-10-01`, por ativação explícita do job pausado. Não é uma tentativa automática depois de uma busca vazia e não se aplica a outubro completo ou janeiro-setembro. O usuário autorizou substituir a estratégia nesse piloto: pelos relatórios, cerca de 107 consultas de detalhe em vez de 93 por cliente, sem tentar novamente cada cliente antes de cada protocolo.
+
+Após publicar esta atualização da API, com as mesmas flags temporárias e ritmo de 1 req/s usados na função `pilot`, executar:
+
+```bash
+pilot enable-pilot-protocol 8a55cdb3-eead-4288-b74b-aab99ad24b71
+```
+
+Esse comando **não faz HTTP, não inicia o job e não publica registros**. Registra `enrichmentStrategy=protocol` e uma permissão em `protocolException`, vinculada ao ID do próprio job e à data de abertura. Aceita somente o piloto diário de 01/10 pausado pelo erro de atendimento não resolvido. Preserva o estado pausado, limite, contagem acumulada de chamadas, horário de retomada, páginas e dados já salvos. O teto não pode ultrapassar 500 e o worker rejeita ritmo diferente de 1 req/s nessa estratégia.
+
+Conferir na saída `state=paused` e `enrichment_strategy=protocol`. Depois, a retomada do **mesmo job** continua com:
+
+```bash
+pilot start 8a55cdb3-eead-4288-b74b-aab99ad24b71
+pilot run 8a55cdb3-eead-4288-b74b-aab99ad24b71
+```
+
+Não recriar o job nem apagar sua página pendente. A consulta exata usa `busca=protocolo`, `limit=1` e `apenas_pendente=nao`, sem um filtro de datas que possa excluir o próprio registro. Não varre o histórico: identifica um único atendimento e valida sua data contra o dia da listagem antes de aceitar o retorno. Zero, múltiplos resultados, protocolo, ID, cliente ou dia divergentes interrompem a etapa. Não utiliza o responsável como substituto do usuário de abertura.
+
+O detalhe é minimizado por `projectHistoryRecord` e salvo em `application_settings`, em chaves `hubsoft_history_protocol:JOB:ID_ATENDIMENTO`, com instante de observação por atendimento. CPF, telefone e campos arbitrários não entram nesse cache. A consulta já resolvida não é repetida ao reprocessar a página ou encontrar o mesmo atendimento em outro fluxo. O cache por cliente, inclusive sua resposta vazia, permanece intacto. A retenção desse cache acompanha a política futura de retenção dos jobs, sem limpeza automática nesta entrega.
+
+As chamadas de diagnóstico já feitas continuam no orçamento original, assim como OAuth, erros e consultas de OS. As regras de publicação são preservadas: referência de OS exportada por cadastro não comprova o universo por conclusão, e os vínculos ainda precisam de conferência independente. A autorização desta exceção não é uma aprovação dos indicadores. Não há migração nova nem necessidade de alterar `.env.vps`; reconstruir somente a API e ativar a exceção no job após o deploy.
+
 ## Operação na VPS após o piloto estar autorizado
 
 Definir o `dc` do **Sales**, com `compose.vps.yml` apenas. Não usar o compose do Tasks. Os exemplos abaixo são de operação futura; não estão executados automaticamente no deploy.
@@ -121,7 +148,7 @@ Na evidência de aprovação, adicionar `followup={"reportSha256":"HASH_DA_CONFE
 
 O worker verifica quantidade declarada de OS contra a lista recebida quando a quantidade é fornecida. Lista ausente sem quantidade zero explícita, lista incompleta, ID duplicado ou pai divergente pausam a carga e preservam o checkpoint. As três conferências são independentes; os totais anteriores de outubro (1.267 atendimentos e 566 OS) precisam ser reconfirmados com **cadastro de atendimento e conclusão de OS**, antes de serem usados como referência. Não forçar esses números se o relatório anterior usava outro campo de data.
 
-Os dados são gravados em `history_pages`, `history_clients` e `history_records`, separados dos indicadores publicados. Cada página é capturada uma vez e os complementos ficam persistidos. O nome de abertura e os vínculos de OS são procurados por cliente distinto e dia de abertura; diferentes atendimentos do mesmo cliente mantêm nomes distintos. A rota de cliente cheia (50 itens) pausa com `HUBSOFT_CLIENTE_PAGINACAO_NAO_CONFIRMADA`, pois não há contrato validado para navegar além do limite. Não existe fallback por protocolo na carga histórica.
+Os dados são gravados em `history_pages`, `history_clients` e `history_records`, separados dos indicadores publicados. Cada página é capturada uma vez e os complementos ficam persistidos. O nome de abertura e os vínculos de OS são procurados por cliente distinto e dia de abertura; diferentes atendimentos do mesmo cliente mantêm nomes distintos. A rota de cliente cheia (50 itens) pausa com `HUBSOFT_CLIENTE_PAGINACAO_NAO_CONFIRMADA`, pois não há contrato validado para navegar além do limite. Não existe fallback automático por protocolo na carga histórica. A exceção autorizada para o piloto diário de 01/10 é ativada explicitamente no job, conforme a seção acima.
 
 IDs de origem são obrigatórios. Atendimentos de precisão diária não recebem uma hora inventada. OS exige hora nos campos de data preenchidos. O campo de data de negócio define o mês, e um registro fora de 2026/corte não entra no mês. OS embutida e direta são deduplicadas pelo ID; a versão direta tem preferência sobre uma embutida. Divergências sem versão verificável precisam ser revistas no piloto. A chave `hubsoft:ID` em `source_records`, junto de `kind`, preserva o ID canônico; o protocolo/número fica no payload. Registros legados sem IDs continuam legíveis e são relacionados pelo número de negócio quando ele for unívoco. Se a associação for ambígua, o processo para. Reimportações de planilha usam essa associação para evitar duplicar o registro canônico.
 
