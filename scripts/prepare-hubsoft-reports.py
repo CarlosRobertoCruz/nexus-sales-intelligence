@@ -43,7 +43,7 @@ def report_day(value):
     raise ValueError('DATA_RELATORIO_INVALIDA')
 
 
-def read_report(path, identity, date_field):
+def read_report(path, identity, date_field, extra_fields=()):
     if path.suffix.lower() == '.zip':
         with zipfile.ZipFile(path) as archive:
             entries = [item for item in archive.infolist() if item.filename.lower().endswith('.xlsx')]
@@ -81,7 +81,8 @@ def read_report(path, identity, date_field):
             if identifier in seen:
                 raise ValueError('CHAVES_RELATORIO_DUPLICADAS')
             seen.add(identifier)
-            records.append({'key': identifier, 'day': report_day(record[date_field])})
+            records.append({'key': identifier, 'day': report_day(record[date_field]),
+                            **{field: record.get(field) for field in extra_fields}})
         return records, {'filename': filename, 'fileSha256': hashlib.sha256(content).hexdigest(),
                          'sourceRecords': len(records), 'excludedFooters': footers}
     finally:

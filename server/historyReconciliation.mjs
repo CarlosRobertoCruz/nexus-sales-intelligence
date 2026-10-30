@@ -1,4 +1,4 @@
-import {exactId,validateManifest,monthsFor} from './historyPolicy.mjs';
+import {exactId,validateManifest,monthsFor,checklistExclusions} from './historyPolicy.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const native={attendance:'id_atendimento',serviceOrders:'id_ordem_servico'};
 const business={attendance:'protocolo',serviceOrders:'numero_ordem_servico'};
@@ -17,6 +17,7 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
     const fixed=reference.keys.map(exactId);
     if(new Set(fixed).size!==fixed.length||fixed.length!==wanted.size||fixed.some(key=>!wanted.has(key))) return fail('REFERENCIA_RELATORIO_DIVERGENTE');
   }
+  const exclusions=checklistExclusions(kind,reference);
   const found=new Map(),seenIds=new Set();
   for(const row of rows) {
     const id=exactId(row.upstream_id),key=field===native[kind]?id:exactId(row.payload?.[field]);
@@ -29,8 +30,17 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
   const ambiguous=[...found].filter(([,ids])=>ids.length!==1).map(([key,ids])=>({key,ids}));
   const mapping=[...found].filter(([key,ids])=>wanted.has(key)&&ids.length===1).map(([key,ids])=>({key,id:ids[0]})).sort((a,b)=>a.key.localeCompare(b.key));
   const sourceField=reference.exportFilters?.dateField;
-  const blocker=sourceField&&sourceField!==reference.filters?.dateField?'ESCOPO_RELATORIO_NAO_COMPARAVEL':null;
-  return {status:missing.length||extra.length||ambiguous.length?'divergent':blocker?'blocked':'matched',blocker,
+  const blocker=sourceField&&sourceField!==reference.filters?.dateField?'ESCOPO_RELATORIO_NAO_COMPARAVEL'
+    : reference.collectionScope?.destination && reference.exportScope?.destination && reference.collectionScope.destination!==reference.exportScope.destination ? 'ESCOPO_DESTINO_NAO_COMPARAVEL' : null;
+  const commercialScope=exclusions.size ? {
+    expected:wanted.size-exclusions.size,
+    actual:[...found.values()].reduce((sum,ids)=>sum+ids.length,0)-[...exclusions].reduce((sum,key)=>sum+(found.get(key)?.length??0),0),
+    excludedChecklistKeys:[...exclusions].sort(),
+    missing:missing.filter(key=>!exclusions.has(key)),extra:extra.filter(key=>!exclusions.has(key)),
+    ambiguous:ambiguous.filter(item=>!exclusions.has(item.key)),
+    sourceReconciliationRequired:true,
+  } : undefined;
+  return {...(commercialScope ? {commercialScope} : {}),status:missing.length||extra.length||ambiguous.length?'divergent':blocker?'blocked':'matched',blocker,
     keyField:field,expected:wanted.size,actual:rows.length,missing,extra,ambiguous,mapping};
 }
 

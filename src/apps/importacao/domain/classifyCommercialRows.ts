@@ -356,6 +356,10 @@ function isCompletedCancellation(combinedText: string, order: ServiceOrder | und
   return /cancelamento (?:foi )?(?:realizado|conclu[ií]do|efetivado)|(?:contrato|servi[cç]o) (?:foi )?cancelad[oa]|retirada (?:foi|ser[aá]) agendada/.test(normalized);
 }
 
+function isChecklistOrder(row: RowRecord): boolean {
+  return /\bcheck[\s-]*list\b/.test(normalize(text(row, "tipo_ordem_servico")));
+}
+
 function orderIndex(rows: ReadonlyArray<RowRecord>): ServiceOrderIndex {
   const byId = new Map<string, ServiceOrder>();
   const byAttendanceId = new Map<string, ServiceOrder[]>();
@@ -427,7 +431,9 @@ export function classifyCommercialRows(
   if (!attendanceRows.length) throw new Error("Nenhum atendimento válido foi encontrado no arquivo selecionado.");
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
 
-  const orders = orderIndex(osRows);
+  // Preserve the raw volume; checklists cannot supply links or commercial evidence.
+  const commercialOsRows = osRows.filter(row => !isChecklistOrder(row));
+  const orders = orderIndex(commercialOsRows);
   const explicitRenewalTickets = renewalTicketsWithExplicitCommercialAction(attendanceRows.filter(eligibleForClassification));
   const sales: ClassifiedSale[] = [];
   const renewals: ClassifiedRenewal[] = [];
@@ -522,7 +528,7 @@ export function classifyCommercialRows(
   const periodStart = sortedDates[0];
   const periodEnd = sortedDates.at(-1) ?? periodStart;
   const periodKey = importPeriodKey(periodStart, periodEnd);
-  for (const row of osRows) {
+  for (const row of commercialOsRows) {
     if (!isReactivationServiceOrder(row)) continue;
     const date = parseDate(row.data_referencia_bi === "data_termino_executado" ? row.data_termino_executado : row.data_inicio_programado);
     if (!date) continue;
@@ -530,6 +536,8 @@ export function classifyCommercialRows(
   }
   const commercialNames = attendanceRows.filter((row) => SELLERS.some((seller) => seller.pattern.test(normalize(text(row, "usuario_abertura"))))).length;
   const warnings: string[] = [];
+  const checklistCount = osRows.length - commercialOsRows.length;
+  if (checklistCount) warnings.push(`${checklistCount} OS de checklist preservada(s) no volume bruto e excluída(s) da classificação comercial e dos vínculos usados nos indicadores.`);
   const incompleteAttendances=attendanceRows.filter(row=>!eligibleForClassification(row)).length;
   if(incompleteAttendances) warnings.push(`${incompleteAttendances} atendimento(s) com dados incompletos foram contabilizados sem classificação comercial automática. Revise os campos ausentes na origem.`);
   const uniqueSales = deduplicateCommercialEvents(sales);

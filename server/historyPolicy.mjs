@@ -38,6 +38,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
     const identities=kind==='attendance'?['id_atendimento','protocolo']:['id_ordem_servico','numero_ordem_servico'];
     if(report.keyField!==undefined&&!identities.includes(report.keyField)) return fail('CAMPO_IDENTIDADE_INVALIDO');
     if(report.keys!==undefined&&(!Array.isArray(report.keys)||report.keys.length>50000||new Set(report.keys.map(exactId)).size!==report.keys.length)) return fail('CHAVES_RELATORIO_DUPLICADAS');
+    checklistExclusions(kind,report);
     if(report.filters.addressType!==undefined&&report.filters.addressType!=='instalacao') return fail('TIPO_ENDERECO_NAO_MAPEADO');
     if(report.exportFilters?.dateField!==undefined&&!['data_cadastro','data_fechamento','data_inicio_programado','data_termino_executado'].includes(report.exportFilters.dateField)) return fail('CAMPO_DATA_EXPORTACAO_INVALIDO');
     if(report.filters.otherFilters!=='none') return fail('FILTROS_ADICIONAIS_EXIGEM_MAPEAMENTO');
@@ -83,4 +84,15 @@ export function assertContractRecord(kind,record) {
   exactId(record[kind==='attendance'?'id_atendimento':'id_ordem_servico']);
   if(kind==='attendance') localDay(record.data_cadastro);
   else { for(const name of ['data_cadastro','data_inicio_programado','data_inicio_executado','data_termino_executado']) if(record[name]) localDay(record[name],true); }
+}
+
+// A commercial exclusion is not permission to omit an item from source reconciliation.
+export function checklistExclusions(kind,reference) {
+  const value=reference?.commercialExclusions;
+  if(value===undefined) return new Set();
+  const fail=()=>{throw Object.assign(new Error('EXCLUSOES_COMERCIAIS_INVALIDAS'),{code:'EXCLUSOES_COMERCIAIS_INVALIDAS'});};
+  if(kind!=='serviceOrders'||value?.reason!=='checklist'||!Array.isArray(value.keys)||value.keys.length>50000||!Array.isArray(reference.keys)) return fail();
+  const keys=value.keys.map(exactId),source=new Set(reference.keys.map(exactId));
+  if(new Set(keys).size!==keys.length||keys.some(key=>!source.has(key))) return fail();
+  return new Set(keys);
 }
