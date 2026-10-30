@@ -41,3 +41,7 @@ Estas regras se aplicam a todo o projeto e a qualquer implementacao, teste ou ex
 - A sincronizacao manual anterior conserva seu limite de quatro GETs e usa o mesmo gate. Os testes de compatibilidade antigos podem exercitar seu complemento legado por protocolo; o script historico nao o utiliza.
 - 429 persiste cooldown e politica; token protegido e compartilhado ate expires_in ou 401. Leituras externas continuam restritas a GET e OAuth POST.
 - Limite de 50 mil registros preservado; datas de atendimento sem hora inventada; filtro de OS precisa coincidir com os relatorios. Nenhuma necessidade de aprovacao adicional de administrador Hubsoft; acesso negado e um impedimento tecnico.
+
+## Qualidade dos dados historicos
+- Descricao de abertura e tipo ausentes nas duas respostas de um atendimento com identidade/cliente/dia/autor validados podem ser guardados no staging como classification_status=incomplete, com quality_missing_fields. Nao inventar descricao ou tipo nem descartar o atendimento para forcar contagens.
+- Esses registros contam no volume de atendimentos, mas nao geram classificacao comercial automatica, inclusive por vinculo de OS. A publicacao exige reconciliacao e confirmIncompleteRecords=true na evidencia quando houver pendencias, alem de todas as validacoes anteriores. Identidade, cliente, data e autor permanecem obrigatorios.

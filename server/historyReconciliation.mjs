@@ -56,7 +56,13 @@ export async function historyReconciliation(db,id) {
       :Array.isArray(reference.keys)||Array.isArray(reference.ids)?compareHistoryReport('serviceOrders',cohort,{reportSha256:reference.fileSha256,keys:reference.keys,ids:reference.ids},reference)
       :{status:'blocked',blocker:'CHAVES_RELATORIO_NAO_FORNECIDAS',actual:cohort.length};
   }
-  return {jobId:id,month,state:job.state,publishable:job.state==='awaiting_validation'&&Object.values(reports).every(r=>r.status==='matched'),reports};
+  const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete');
+  const missingFields={};
+  for(const row of incomplete) for(const field of String(row.payload.quality_missing_fields??'').split(',')) {
+    if(['descricao_abertura','tipo_atendimento'].includes(field)) missingFields[field]=(missingFields[field]??0)+1;
+  }
+  const quality={incompleteAttendances:incomplete.length,missingFields,requiresExplicitReview:incomplete.length>0};
+  return {jobId:id,month,state:job.state,publishable:job.state==='awaiting_validation'&&!incomplete.length&&Object.values(reports).every(r=>r.status==='matched'),quality,reports};
 }
 
 // Only references may change. Period, date basis, limits and collected data stay fixed.
