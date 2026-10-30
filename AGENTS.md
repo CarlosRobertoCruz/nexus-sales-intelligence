@@ -45,3 +45,5 @@ Estas regras se aplicam a todo o projeto e a qualquer implementacao, teste ou ex
 ## Qualidade dos dados historicos
 - Descricao de abertura e tipo ausentes nas duas respostas de um atendimento com identidade/cliente/dia/autor validados podem ser guardados no staging como classification_status=incomplete, com quality_missing_fields. Nao inventar descricao ou tipo nem descartar o atendimento para forcar contagens.
 - Esses registros contam no volume de atendimentos, mas nao geram classificacao comercial automatica, inclusive por vinculo de OS. A publicacao exige reconciliacao e confirmIncompleteRecords=true na evidencia quando houver pendencias, alem de todas as validacoes anteriores. Identidade, cliente, data e autor permanecem obrigatorios.
+
+- Checklists no tipo de OS ficam fora da classificação comercial e dos vínculos usados como evidência de indicadores, mas permanecem no volume bruto e na conferência da origem. Exclusão comercial não autoriza descartar suporte sem cliente nem aprovar divergências de destino; referências devem preservar todas as chaves e registrar as exclusões separadamente.

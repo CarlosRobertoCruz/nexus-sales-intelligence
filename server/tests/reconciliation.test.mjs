@@ -40,3 +40,38 @@ test('manifesto permite piloto de coleta com referência de acompanhamento pende
   assert.throws(()=>validateManifest({...m,autoPublish:true},'2026-10-29'),/REFERENCIA_PENDENTE_NAO_PERMITIDA/);
   assert.throws(()=>validateManifest({...m,reports:{...m.reports,attendance:{...m.reports.attendance,keyField:'nome_razaosocial'}}},'2026-10-29'),/IDENTIDADE/);
 });
+
+test('exclusão comercial de checklist separa a pendência real, sem aprovar reconciliação bruta divergente',()=>{
+  const ref={...reference,keys:['74','96','200','300'],commercialExclusions:{reason:'checklist',keys:['200']}};
+  const result=compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref);
+  assert.equal(result.status,'divergent');assert.equal(result.expected,4);assert.equal(result.actual,2);
+  assert.deepEqual(result.missing,['200','300']);
+  assert.equal(result.commercialScope.expected,3);assert.equal(result.commercialScope.actual,2);
+  assert.deepEqual(result.commercialScope.missing,['300']);assert.deepEqual(result.commercialScope.excludedChecklistKeys,['200']);
+  assert.equal(result.commercialScope.sourceReconciliationRequired,true);
+});
+
+test('checklist também coletado é preservado no volume bruto e retirado só do resumo comercial',()=>{
+  const ref={...reference,commercialExclusions:{reason:'checklist',keys:['96']}};
+  const result=compareHistoryReport('serviceOrders',rows,evidence,ref);
+  assert.equal(result.actual,2);assert.equal(result.commercialScope.actual,1);assert.equal(result.status,'matched');
+});
+
+test('escopo de destino continua bloqueando mesmo com todos os números iguais',()=>{
+  const result=compareHistoryReport('serviceOrders',rows,evidence,{...reference,collectionScope:{destination:'cliente_servico'},exportScope:{destination:'all'}});
+  assert.equal(result.status,'blocked');assert.equal(result.blocker,'ESCOPO_DESTINO_NAO_COMPARAVEL');
+});
+
+test('não permite exceção comercial por suporte, chave inexistente, duplicada ou em atendimento',()=>{
+  for(const exclusion of [{reason:'support',keys:['96']},{reason:'checklist',keys:['999']},{reason:'checklist',keys:['96','96']}]) {
+    assert.throws(()=>compareHistoryReport('serviceOrders',rows,evidence,{...reference,commercialExclusions:exclusion}),/EXCLUSOES_COMERCIAIS_INVALIDAS/);
+  }
+  assert.throws(()=>compareHistoryReport('attendance',[],{reportSha256:reference.fileSha256,keys:[]},{...reference,keyField:'protocolo',keys:[],commercialExclusions:{reason:'checklist',keys:[]}}),/EXCLUSOES_COMERCIAIS_INVALIDAS/);
+});
+
+test('referências com exclusões inválidas são recusadas antes de atualizar o manifesto',()=>{
+  const m={year:2026,phase:'day',peakDay:'2026-10-01',cutoff:'2026-10-01',osDateField:'data_termino_executado',maxCalls:500,
+    reports:{attendance:{...reference,keyField:'protocolo',exportedAt:'2026-10-30',filters:{dateField:'data_cadastro',otherFilters:'none'}},
+    serviceOrders:{...reference,exportedAt:'2026-10-30',commercialExclusions:{reason:'checklist',keys:['999']}}}};
+  assert.throws(()=>validateManifest(m,'2026-10-30'),/EXCLUSOES_COMERCIAIS_INVALIDAS/);
+});
