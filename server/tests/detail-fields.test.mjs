@@ -36,3 +36,20 @@ test('ausência nas duas respostas continua sendo erro, sem substituir por respo
     assert.deepEqual(error.diagnostic.missingFields,['descricao_abertura','usuario_abertura','tipo_atendimento']);return true;
   });
 });
+
+test('normalização histórica pode preservar campos de negócio vazios com pendência explícita',()=>{
+  const result=normalizeHubsoft('attendance',{...primary,usuario_abertura:'Beatriz'},{},{allowIncompleteBusinessFields:true});
+  assert.equal(result.classification_status,'incomplete');
+  assert.equal(result.quality_missing_fields,'descricao_abertura,tipo_atendimento');
+  assert.equal(result.descricao_abertura,'');assert.equal(result.tipo_atendimento,'');
+  assert.equal(result.protocolo,primary.protocolo);
+  const complete=normalizeHubsoft('attendance',detail,{},{allowIncompleteBusinessFields:true});
+  assert.equal(complete.classification_status,undefined);
+});
+test('identidade, cliente, data e usuário não são dispensados pelo modo de campos incompletos',()=>{
+  assert.throws(()=>normalizeHubsoft('attendance',primary,{},{allowIncompleteBusinessFields:true}),error=>{
+    assert.deepEqual(error.diagnostic.missingFields,['usuario_abertura']);return true;
+  });
+  assert.throws(()=>normalizeHubsoft('attendance',{...detail,protocolo:''},{},{allowIncompleteBusinessFields:true}),/CAMPOS_INSUFICIENTES/);
+  assert.throws(()=>normalizeHubsoft('attendance',{...detail,data_cadastro:null},{},{allowIncompleteBusinessFields:true}),/CAMPOS_INSUFICIENTES/);
+});

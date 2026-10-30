@@ -261,12 +261,38 @@ test('retomada completa campos pelo detalhe, preserva páginas concluídas e exp
   const failed=await createHistoryJob(db,m);
   await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[failed]);
   await enablePilotProtocol(db,failed);await controlHistoryJob(db,failed,'start');
-  const bad={page:async()=>({records:[raw],complete:true}),attendanceDetail:async()=>({...detail,descricao_abertura:null,tipo_atendimento:null})};
+  const bad={page:async()=>({records:[raw],complete:true}),attendanceDetail:async()=>({...detail,usuario_abertura:null})};
   await historyStep(db,bad,failed);
   const error=await historyStep(db,bad,failed);
   assert.equal(error.state,'paused');assert.equal(error.error_code,'HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES');
-  assert.deepEqual(error.diagnostic,{kind:'attendance',missingFields:['descricao_abertura','tipo_atendimento'],invalidFields:[]});
+  assert.deepEqual(error.diagnostic,{kind:'attendance',missingFields:['usuario_abertura'],invalidFields:[]});
   const diagnostic=(await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_diagnostic:${failed}`])).rows[0].value;
   assert.deepEqual(diagnostic,error.diagnostic);assert.equal(JSON.stringify(diagnostic).includes('Beatriz'),false);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+}));
+
+test('dados de negócio realmente ausentes não bloqueiam coleta; publicação exige revisão explícita',async()=>fixture(async db=>{
+  const m={...structuredClone(manifest),peakDay:'2026-10-01',cutoff:'2026-10-01'};
+  const raw={...attendance,protocolo:'202610010001',data_cadastro:'01/10/2026',usuario_abertura:null,descricao_abertura:null,tipo_atendimento:null,ordem_servico_count:0};
+  const detail={...raw,usuario_abertura:'Beatriz',ordens_servico:[]};
+  const order={...orphan,data_cadastro:'01/10/2026 08:00:00',data_inicio_programado:'01/10/2026 09:00:00',data_inicio_executado:'01/10/2026 09:00:00',data_termino_executado:'01/10/2026 10:00:00'};
+  const id=await createHistoryJob(db,m);
+  await db.query("UPDATE history_jobs SET state='paused',error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[id]);
+  await enablePilotProtocol(db,id);await controlHistoryJob(db,id,'start');
+  let details=0;
+  const client={page:async stream=>({records:stream==='attendance'?[raw]:stream==='serviceOrderCompletions'?[order]:[],complete:true}),attendanceDetail:async()=>{details++;return detail;}};
+  let status;
+  for(let i=0;i<14;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));assert.equal(details,1);
+  assert.equal(status.totals.find(r=>r.kind==='attendance').incomplete_records,1);
+  const stored=(await db.query("SELECT payload FROM history_records WHERE job_id=$1 AND kind='attendance'",[id])).rows[0].payload;
+  assert.equal(stored.classification_status,'incomplete');assert.equal(stored.descricao_abertura,'');assert.equal(stored.tipo_atendimento,'');
+  const proof={month:'2026-10',reviewer:'Teste',confirmFilters:true,attendance:{reportSha256:m.reports.attendance.fileSha256,ids:['101']},serviceOrders:{reportSha256:m.reports.serviceOrders.fileSha256,ids:[String(order.id_ordem_servico)]},followup:{reportSha256:m.reports.followup.fileSha256,ids:[]}};
+  await assert.rejects(approveHistoryMonth(db,id,proof),/REVISAO_CAMPOS_INCOMPLETOS/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  await approveHistoryMonth(db,id,{...proof,confirmIncompleteRecords:true});
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM commercial_records WHERE kind='attendance'")).rows[0].n,1);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM commercial_records WHERE kind='sales'")).rows[0].n,0);
+  const report=await historyReconciliation(db,id);
+  assert.equal(report.quality.incompleteAttendances,1);assert.equal(report.quality.requiresExplicitReview,true);
 }));

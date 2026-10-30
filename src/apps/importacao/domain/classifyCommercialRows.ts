@@ -198,14 +198,19 @@ function isCompletedInstallationOrder(order: ServiceOrder): boolean {
     && order.executionFinishedAt.getTime() >= order.executionStartedAt.getTime();
 }
 
+function eligibleForClassification(row: RowRecord): boolean {
+  return text(row,"classification_status") !== "incomplete";
+}
+
 function attendanceForInstallationOrder(order: ServiceOrder, attendanceRows: ReadonlyArray<RowRecord>): RowRecord | undefined {
   if (order.attendanceId) {
-    return attendanceRows.find(row=>text(row,"id_atendimento")===order.attendanceId
+    return attendanceRows.find(row=>eligibleForClassification(row)&&text(row,"id_atendimento")===order.attendanceId
       && isInstallationAttendance(row)
       && (parseDate(row.data_cadastro)?.getTime() ?? Infinity)<=(order.executionStartedAt?.getTime() ?? 0));
   }
   if (order.id.startsWith("hubsoft:")) return undefined;
   const sameCustomer = attendanceRows.filter((row) => {
+    if (!eligibleForClassification(row)) return false;
     const customerCode = text(row, "codigo_cliente");
     if (order.customerCode && customerCode) return order.customerCode === customerCode;
     return Boolean(order.customerName) && normalize(order.customerName) === normalize(text(row, "nome_razaosocial"));
@@ -423,7 +428,7 @@ export function classifyCommercialRows(
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
 
   const orders = orderIndex(osRows);
-  const explicitRenewalTickets = renewalTicketsWithExplicitCommercialAction(attendanceRows);
+  const explicitRenewalTickets = renewalTicketsWithExplicitCommercialAction(attendanceRows.filter(eligibleForClassification));
   const sales: ClassifiedSale[] = [];
   const renewals: ClassifiedRenewal[] = [];
   const cancellations: ClassifiedCancellation[] = [];
@@ -443,6 +448,7 @@ export function classifyCommercialRows(
     const linkedOrder = resolveServiceOrder(row, combined, orders);
     if (linkedOrder) linkedServiceOrders += 1;
     processedAttendance.push({ id: text(row,"id_atendimento") ? `hubsoft:${text(row,"id_atendimento")}` : protocol, date, linkedServiceOrder: Boolean(linkedOrder) });
+    if (!eligibleForClassification(row)) continue;
     const seller = resolveSeller(row, combined);
     const plan = extractPlan(combined);
 
@@ -492,6 +498,7 @@ export function classifyCommercialRows(
     const combined = installationText(row);
     const commercialDate = linkedOrder.executionFinishedAt;
     const plan = extractPlan(combined);
+    if (!eligibleForClassification(row)) continue;
     const seller = resolveSeller(row, combined);
     sales.push({
       id: linkedOrder.id,
@@ -523,6 +530,8 @@ export function classifyCommercialRows(
   }
   const commercialNames = attendanceRows.filter((row) => SELLERS.some((seller) => seller.pattern.test(normalize(text(row, "usuario_abertura"))))).length;
   const warnings: string[] = [];
+  const incompleteAttendances=attendanceRows.filter(row=>!eligibleForClassification(row)).length;
+  if(incompleteAttendances) warnings.push(`${incompleteAttendances} atendimento(s) com dados incompletos foram contabilizados sem classificação comercial automática. Revise os campos ausentes na origem.`);
   const uniqueSales = deduplicateCommercialEvents(sales);
   const uniqueRenewals = deduplicateCommercialEvents(renewals);
   if (commercialNames / attendanceRows.length < 0.7) warnings.push("A maior parte dos atendimentos não pertence à equipe comercial conhecida. Confirme o filtro do relatório.");

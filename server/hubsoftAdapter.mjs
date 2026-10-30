@@ -22,7 +22,7 @@ function diagnosticDate(kind, field, value) {
   try { return apiDate(value); }
   catch { throw new HubsoftMappingError("HUBSOFT_DATA_NAO_RECONHECIDA", kind, [], [field]); }
 }
-export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled = true } = {}) {
+export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled = true, allowIncompleteBusinessFields = false } = {}) {
   let clientCode = pick(
     row,
     "codigo_cliente",
@@ -87,10 +87,15 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
     );
     const date = diagnosticDate(kind, "data_cadastro", pick(row, "data_cadastro_br", "data_cadastro"));
     requireHubsoftFields("HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES", kind, {
-      protocolo: protocol, nome_razaosocial: customer, descricao_abertura: description,
-      usuario_abertura: user, tipo_atendimento: type, data_cadastro: date,
+      protocolo: protocol, nome_razaosocial: customer,
+      ...(!allowIncompleteBusinessFields ? {descricao_abertura:description} : {}),
+      usuario_abertura: user,
+      ...(!allowIncompleteBusinessFields ? {tipo_atendimento:type} : {}),
+      data_cadastro: date,
     }, ["protocolo"]);
+    const missingBusinessFields=Object.entries({descricao_abertura:description,tipo_atendimento:type}).filter(([,value])=>!value).map(([field])=>field);
     return {
+      ...(allowIncompleteBusinessFields&&missingBusinessFields.length?{classification_status:'incomplete',quality_missing_fields:missingBusinessFields.join(',')}:{}),
       ...(row.id_atendimento != null ? { id_atendimento:String(row.id_atendimento) } : {}),
       protocolo: protocol,
       nome_razaosocial: customer,

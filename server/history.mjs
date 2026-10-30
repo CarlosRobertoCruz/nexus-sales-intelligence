@@ -28,7 +28,7 @@ export async function createHistoryJob(db,manifest) {
 export async function historyStatus(db,id) {
   const job=(await db.query("SELECT id,phase,state,month_index,next_at,error_code,approved,(manifest ? 'followupCutoff') AS has_followup,COALESCE(manifest->>'enrichmentStrategy','client') AS enrichment_strategy FROM history_jobs WHERE id=$1",[id])).rows[0];
   if(!job) throw codeError('CARGA_NAO_ENCONTRADA');
-  const totals=(await db.query('SELECT kind,count(*)::int AS unique_records FROM history_records WHERE job_id=$1 GROUP BY kind',[id])).rows;
+  const totals=(await db.query(`SELECT kind,count(*)::int AS unique_records,count(*) FILTER(WHERE payload->>'classification_status'='incomplete')::int AS incomplete_records FROM history_records WHERE job_id=$1 GROUP BY kind`,[id])).rows;
   const pages=(await db.query('SELECT count(*)::int AS pages,count(*) FILTER(WHERE processed)::int AS processed FROM history_pages WHERE job_id=$1',[id])).rows[0];
   const calls=(await db.query(`SELECT count(*)::int AS calls,count(*) FILTER(WHERE status=429)::int AS rate_limited,
     count(*) FILTER(WHERE method='POST')::int AS oauth_calls,avg(latency_ms) AS latency_avg_ms,
@@ -58,10 +58,10 @@ function normalizedAttendanceDetail(raw,detail,customer,created) {
   if(exactId(clientCode(detail))!==customer) throw codeError('HUBSOFT_CLIENTE_DIVERGENTE');
   if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
   if(detail.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
-  return normalized('attendance',mergeAttendanceDetail(raw,detail));
+  return normalized('attendance',mergeAttendanceDetail(raw,detail),{allowIncompleteBusinessFields:true});
 }
-function normalized(kind,raw) {
-  const row=kind==='serviceOrders' ? normalizeHubsoft(kind,orderDates(raw),{},{requireScheduled:false}) : normalizeHubsoft(kind,raw);
+function normalized(kind,raw,{allowIncompleteBusinessFields=false}={}) {
+  const row=kind==='serviceOrders' ? normalizeHubsoft(kind,orderDates(raw),{},{requireScheduled:false}) : normalizeHubsoft(kind,raw,{},{allowIncompleteBusinessFields});
   if(kind==='attendance') { row.data_cadastro=row.data_cadastro.split(' ')[0]; row.date_precision='day'; }
   assertContractRecord(kind,row);
   return row;
@@ -221,6 +221,8 @@ export async function approveHistoryMonth(pool,id,evidence) {
     if(evidence.month!==month || !evidence.reviewer || evidence.confirmFilters!==true) throw codeError('EVIDENCIA_INVALIDA');
     const rows=(await db.query('SELECT kind,upstream_id,payload FROM history_records WHERE job_id=$1 AND month=$2',[id,month])).rows;
     const reports=job.phase==='history'?job.manifest.monthReports[month]:job.manifest.reports;
+    const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete').length;
+    if(incomplete&&evidence.confirmIncompleteRecords!==true) throw codeError('REVISAO_CAMPOS_INCOMPLETOS_OBRIGATORIA');
     if(job.manifest.followupCutoff&&reports.followup.pending) throw codeError('REFERENCIA_ACOMPANHAMENTO_PENDENTE');
     for(const kind of ['attendance','serviceOrders']) {
       const supplied=evidence[kind];
@@ -234,7 +236,7 @@ export async function approveHistoryMonth(pool,id,evidence) {
     // Atualiza os indicadores somente na mesma transação da publicação aprovada.
     await rebuild(db);
     const done=job.month_index+1>=monthsFor(job.manifest).length;
-    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
+    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),incompleteAttendances:incomplete,confirmedIncompleteRecords:incomplete?evidence.confirmIncompleteRecords===true:false,attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
     await db.query("UPDATE history_jobs SET state=$2,approved=$3,month_index=month_index+1,next_at=now()+interval '5 minutes',error_code=NULL,updated_at=now() WHERE id=$1",[id,done?'complete':'running',done]);
     await db.query('COMMIT');
     return historyStatus(db,id);

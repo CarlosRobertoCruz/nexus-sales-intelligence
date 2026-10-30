@@ -110,7 +110,7 @@ def prepare(args):
         'filters': {'dateField': 'data_cadastro', 'otherFilters': 'none', 'relationship': 'id_atendimento', 'followupCutoff': args.followup_cutoff}}
     manifest = {'year': 2026, 'phase': 'day', 'peakDay': args.day, 'cutoff': args.day,
         'followupCutoff': args.followup_cutoff, 'osDateField': 'data_termino_executado', 'maxCalls': 500, 'reports': references}
-    evidence = {'month': '2026-10', 'reviewer': None, 'confirmFilters': False,
+    evidence = {'month': '2026-10', 'reviewer': None, 'confirmFilters': False, 'confirmIncompleteRecords': False,
         **{kind: {'reportSha256': references[kind]['fileSha256'], 'keys': references[kind]['keys']} for kind in ['attendance', 'serviceOrders']}}
     target = Path(args.output)
     target.mkdir(parents=True, exist_ok=True)

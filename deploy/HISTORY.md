@@ -63,7 +63,7 @@ Somente jobs planejados, pausados ou aguardando validação aceitam essa operaç
 
 O diagnóstico real da terceira página mostrou descrição de abertura e tipo de atendimento ausentes nas posições 3, 4 e 5, além do nome de abertura ainda não resolvido. A implementação anterior aproveitava somente o nome da consulta detalhada. O complemento passa a preencher `descricao_abertura` e `tipo_atendimento` quando faltam na listagem e estão presentes no detalhe. O nome de abertura vem do detalhe quando informado; um complemento vazio não apaga um nome válido já recebido na listagem.
 
-Antes de aproveitar qualquer campo, validar ID, protocolo, código do cliente, dia de abertura e exclusão. Preservar descrição e tipo já preenchidos na listagem, além de IDs, datas e relações originais. Um objeto de tipo que contém somente o ID, sem nome/descrição, não equivale a um tipo textual resolvido. Se as duas fontes estiverem incompletas, pausar sem inventar valores nem usar o responsável como autor.
+Antes de aproveitar qualquer campo, validar ID, protocolo, código do cliente, dia de abertura e exclusão. Preservar descrição e tipo já preenchidos na listagem, além de IDs, datas e relações originais. Um objeto de tipo que contém somente o ID, sem nome/descrição, não equivale a um tipo textual resolvido. Se faltarem identidade, cliente, data ou autor após a consulta detalhada, pausar sem inventar valores nem usar o responsável como autor. Se faltarem somente descrição de abertura e/ou tipo nas duas fontes, aplicar a pendência de qualidade descrita a seguir.
 
 O detalhe minimizado continua no cache por atendimento. A página recebida é preservada sem edição; o registro normalizado recebe os campos complementados. Na retomada, os complementos já válidos e as páginas concluídas não são consultados novamente. Não limpar o job, o cache nem o checkpoint para aplicar esta correção.
 
@@ -93,6 +93,18 @@ Não recriar o job nem apagar sua página pendente. A consulta exata usa `busca=
 O detalhe é minimizado por `projectHistoryRecord` e salvo em `application_settings`, em chaves `hubsoft_history_protocol:JOB:ID_ATENDIMENTO`, com instante de observação por atendimento. CPF, telefone e campos arbitrários não entram nesse cache. A consulta já resolvida não é repetida ao reprocessar a página ou encontrar o mesmo atendimento em outro fluxo. O cache por cliente, inclusive sua resposta vazia, permanece intacto. A retenção desse cache acompanha a política futura de retenção dos jobs, sem limpeza automática nesta entrega.
 
 As chamadas de diagnóstico já feitas continuam no orçamento original, assim como OAuth, erros e consultas de OS. As regras de publicação são preservadas: referência de OS exportada por cadastro não comprova o universo por conclusão, e os vínculos ainda precisam de conferência independente. A autorização desta exceção não é uma aprovação dos indicadores. Não há migração nova nem necessidade de alterar `.env.vps`; reconstruir somente a API e ativar a exceção no job após o deploy.
+
+### Registros sem descrição ou tipo na própria origem
+
+Uma segunda execução confirmou `descricao_abertura` e `tipo_atendimento` ausentes mesmo após combinar a listagem com o detalhe. Esses campos podem continuar vazios no staging somente depois de validar a identidade, protocolo, cliente, dia e usuário de abertura do atendimento. O adaptador manual continua estrito; a tolerância se aplica ao detalhe histórico já verificado.
+
+O registro recebe `classification_status=incomplete` e `quality_missing_fields` com os nomes dos campos ausentes. Não recebe tipo, descrição, data ou autor inventados. O volume de atendimentos permanece completo e os vínculos de OS são preservados. Atendimentos com essa marca não produzem vendas, renovações ou cancelamentos automaticamente, nem são escolhidos para atribuir uma instalação através de OS. As OS válidas continuam contando separadamente por conclusão. Um registro integralmente preenchido em uma extração futura não recebe a marca e pode voltar à classificação normal após validação.
+
+O status informa `incomplete_records` por entidade, e `history reconcile` inclui `quality.incompleteAttendances`, os nomes dos campos afetados e `requiresExplicitReview`. O comando não declara `publishable=true` enquanto houver pendências de qualidade. Se houver uma aprovação consciente dos dados parciais, adicionar `confirmIncompleteRecords=true` à evidência, além dos relatórios e confirmações já exigidos. Essa confirmação permite publicar os atendimentos sem classificação comercial automática, não transforma campos vazios em dados completos. Referências por cadastro versus conclusão e vínculos pendentes continuam bloqueando a publicação independentemente dessa confirmação.
+
+Sem `confirmIncompleteRecords=true`, a aprovação retorna `REVISAO_CAMPOS_INCOMPLETOS_OBRIGATORIA` e reverte todas as escritas de publicação. A continuidade automática também para para essa revisão; não confirma pendências por conta própria. O resumo de qualidade aparece nos avisos da consolidação. A coleta e os complementos previamente salvos permanecem reutilizáveis.
+
+Reconstruir somente a API e retomar o mesmo job. Não há nova migração, limpeza de cache, reenvio de manifesto nem alteração do ritmo ou orçamento. Uma nova fonte que corrija o cadastro deve ser reextraída e reconciliada; o cache de um job continua sendo a observação capturada naquela execução.
 
 ## Operação na VPS após o piloto estar autorizado
 
