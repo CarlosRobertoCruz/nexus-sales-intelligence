@@ -223,7 +223,6 @@ export async function approveHistoryMonth(pool,id,evidence) {
     const reports=job.phase==='history'?job.manifest.monthReports[month]:job.manifest.reports;
     const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete').length;
     if(incomplete&&evidence.confirmIncompleteRecords!==true) throw codeError('REVISAO_CAMPOS_INCOMPLETOS_OBRIGATORIA');
-    if(job.manifest.followupCutoff&&reports.followup.pending) throw codeError('REFERENCIA_ACOMPANHAMENTO_PENDENTE');
     for(const kind of ['attendance','serviceOrders']) {
       const supplied=evidence[kind];
       const comparison=compareHistoryReport(kind,rows.filter(row=>row.kind===kind),supplied,reports[kind]);

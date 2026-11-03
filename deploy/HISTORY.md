@@ -219,3 +219,11 @@ A atualização de código exige build de API e web, pois a classificação é c
 ## Pacote de revisão do piloto diário
 
 A justificativa pontual da OS de suporte e o procedimento de exportação das pendências estão em [PILOT_REVIEW_2026-10-01.md](PILOT_REVIEW_2026-10-01.md). O comando `history export-review UUID diretorio-novo` lê um snapshot somente leitura e gera `review.json` e `conferencia.md`, incluindo protocolos incompletos, todos os atendimentos e OS vinculadas com suas datas. Não consulta Hubsoft, não publica, não inicia o job e não transforma observações locais em evidência independente.
+
+## Regra comercial dos vínculos (atualização posterior)
+
+O acompanhamento de OS é mantido para auditoria, mas não é uma terceira população que bloqueia a publicação dos indicadores. A validação transacional continua obrigatória para os relatórios de **atendimentos** e de **OS de produção**; uma referência de acompanhamento marcada como pendente é apenas observacional.
+
+No Sales, as OS comerciais vinculadas são somente: **instalação**, **retirada/cancelamento** e **reativação**. Renovação é apurada no próprio atendimento; uma OS técnica de troca de aparelho por aumento de velocidade não é renovação comercial. Checklists, suporte, recall, manutenção e migração permanecem no JSON de auditoria, sem revisão manual obrigatória e sem efeito em vendas, cancelamentos, reativações ou renovações.
+
+Quando uma referência de OS contiver chaves não comerciais explicitamente documentadas, o sistema preserva a divergência bruta (`rawStatus` e `rawBlocker`) para auditoria e usa o conjunto comercial para a decisão de publicação. Isso nunca remove bloqueio por campo de data incompatível. Snapshots antigos que ainda não preservaram o tipo da OS aparecem como `unclassified` e também são apenas auditoria; não se deve inferir sua categoria retroativamente.

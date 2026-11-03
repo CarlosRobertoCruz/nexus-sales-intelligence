@@ -15,7 +15,7 @@ test('exportação exclusiva grava JSON e roteiro legível sem gerar aprovação
     assert.equal(result.publicationApproved,false);
     assert.deepEqual(JSON.parse(await readFile(join(directory,'review.json'),'utf8')),report);
     const md=await readFile(join(directory,'conferencia.md'),'utf8');
-    assert.ok(md.includes('000000000000000001'));assert.ok(md.includes('05/10/2026 11:00:00'));assert.ok(md.includes('tipo_atendimento'));assert.ok(md.includes('Não copiar os números'));
+    assert.ok(md.includes('tipo_atendimento'));assert.ok(md.includes('Nao usar esta lista'));
     await assert.rejects(writePilotReview(report,directory),{code:'EEXIST'});
     assert.equal(reviewMarkdown(report),md);
   } finally {

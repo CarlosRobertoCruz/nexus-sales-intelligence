@@ -48,7 +48,18 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
     reviewedOrders:reference.scopeReview.reviewedOrders.map(item=>({key:item.key,reason:item.reason,orderType:item.orderType,destination:item.destination,openedAt:item.openedAt,completedAt:item.completedAt,evidence:{kind:item.evidence.kind,reviewedOn:item.evidence.reviewedOn}})),
     publicationApproved:false,
   } : undefined;
-  return {...(scopeReview ? {scopeReview} : {}),...(commercialScope ? {commercialScope} : {}),status:missing.length||extra.length||ambiguous.length?'divergent':blocker?'blocked':'matched',blocker,
+  const rawStatus=missing.length||extra.length||ambiguous.length?'divergent':blocker?'blocked':'matched';
+  // A report can contain documented non-commercial OS alongside the Sales
+  // cohort. When every remaining commercial key matches, use that scoped
+  // comparison for publication while retaining the full raw discrepancy for
+  // audit. Date-basis mismatches are never waived.
+  const commercialMatches=Boolean(commercialScope)&&!commercialScope.missing.length&&!commercialScope.extra.length&&!commercialScope.ambiguous.length;
+  const commercialBlocker=sourceField&&sourceField!==reference.filters?.dateField
+    ? 'ESCOPO_RELATORIO_NAO_COMPARAVEL' : null;
+  const status=commercialScope?(commercialBlocker?'blocked':commercialMatches?'matched':'divergent'):rawStatus;
+  const effectiveBlocker=commercialScope?(commercialBlocker??(commercialMatches?null:blocker)):blocker;
+  return {...(scopeReview ? {scopeReview} : {}),...(commercialScope ? {commercialScope} : {}),status,blocker:effectiveBlocker,
+    rawStatus,rawBlocker:blocker,
     keyField:field,expected:wanted.size,actual:rows.length,missing,extra,ambiguous,mapping};
 }
 
@@ -70,7 +81,10 @@ export async function historyReconciliation(db,id) {
     const reference=references.followup;
     const cohort=(await db.query(`SELECT o.order_id AS upstream_id,o.payload FROM history_followup_orders o JOIN history_followup_attendances a
       ON a.job_id=o.job_id AND a.attendance_id=o.attendance_id WHERE o.job_id=$1 AND a.month=$2`,[id,month])).rows;
-    reports.followup=reference.pending?{status:'blocked',blocker:'REFERENCIA_ACOMPANHAMENTO_PENDENTE',actual:cohort.length}
+    reports.followup=reference.pending?{status:'observed',blocker:null,actual:cohort.length,
+      commercialActual:cohort.filter(row=>['installation','cancellation','reactivation'].includes(row.payload?.commercial_kind)).length,
+      unclassifiedActual:cohort.filter(row=>!Object.hasOwn(row.payload??{},'commercial_kind')).length,
+      auditOnly:true}
       :Array.isArray(reference.keys)||Array.isArray(reference.ids)?compareHistoryReport('serviceOrders',cohort,{reportSha256:reference.fileSha256,keys:reference.keys,ids:reference.ids},reference)
       :{status:'blocked',blocker:'CHAVES_RELATORIO_NAO_FORNECIDAS',actual:cohort.length};
   }
@@ -80,7 +94,8 @@ export async function historyReconciliation(db,id) {
     if(['descricao_abertura','tipo_atendimento'].includes(field)) missingFields[field]=(missingFields[field]??0)+1;
   }
   const quality={incompleteAttendances:incomplete.length,missingFields,requiresExplicitReview:incomplete.length>0};
-  return {jobId:id,month,state:job.state,publishable:job.state==='awaiting_validation'&&!incomplete.length&&Object.values(reports).every(r=>r.status==='matched'),quality,reports};
+  const productionReports=Object.entries(reports).filter(([kind])=>kind!=='followup').map(([,report])=>report);
+  return {jobId:id,month,state:job.state,publishable:job.state==='awaiting_validation'&&!incomplete.length&&productionReports.every(r=>r.status==='matched'),quality,reports};
 }
 
 // Only references may change. Period, date basis, limits and collected data stay fixed.

@@ -29,22 +29,27 @@ export async function pilotReview(pool,id) {
     const orders=followup.orders.map(row=>({attendanceId:exactId(row.id_atendimento),protocol:protocols.get(String(row.id_atendimento))??null,
       orderId:exactId(row.id_ordem_servico),orderNumber:row.numero_ordem_servico?exactId(row.numero_ordem_servico):null,
       createdAt:row.data_cadastro,scheduledAt:row.data_inicio_programado,executionStartedAt:row.data_inicio_executado,
-      executionFinishedAt:row.data_termino_executado,observedAt:row.observedAt,outcome:row.outcome,existenceAtCutoff:row.existenceAtCutoff,
+      executionFinishedAt:row.data_termino_executado,commercialKind:row.commercial_kind??null,observedAt:row.observedAt,outcome:row.outcome,existenceAtCutoff:row.existenceAtCutoff,
       independentReview:'pending'}));
     const reconciliation=await historyReconciliation(db,id);
     const review={jobId:id,month,state:job.state,openingDay:job.manifest.peakDay,followupCutoff:job.manifest.followupCutoff,
       source:'local_staging_not_independent_evidence',publicationApproved:false,
       statusBasis:'observed_at_extraction_not_historical_snapshot',
-      counts:{attendances:rows.length,incompleteAttendances:incomplete.length,followupAttendances:parents.length,linkedOrders:orders.length,attendancesWithoutOrders:followup.attendancesWithoutOrders},
+      counts:{attendances:rows.length,incompleteAttendances:incomplete.length,followupAttendances:parents.length,linkedOrders:orders.length,
+        commercialLinkedOrders:followup.commercialOrderCount,operationalLinkedOrders:followup.operationalOrderCount,
+        unclassifiedLinkedOrders:followup.unclassifiedOrderCount,attendancesWithoutOrders:followup.attendancesWithoutOrders},
       scopeReview:reconciliation.reports.serviceOrders.scopeReview??null,
       incompleteAttendances:incomplete,attendances:parents,linkedOrders:orders,
-      pending:{independentFollowupReference:reconciliation.reports.followup?.status!=='matched',incompleteDataReview:incomplete.length>0,
+      commercialLinkedOrders:orders.filter(row=>row.commercialKind),
+      operationalLinkedOrderCount:followup.operationalOrderCount,
+      unclassifiedLinkedOrderCount:followup.unclassifiedOrderCount,
+      pending:{commercialFollowupReview:false,incompleteDataReview:incomplete.length>0,
         sourceScopePublicationReview:reconciliation.reports.serviceOrders.status!=='matched'},
       requiredChecks:[
         'Localizar cada protocolo incompleto na Hubsoft e registrar campos presentes ou realmente vazios; não substituir autor, descrição ou tipo.',
-        'Conferir os vínculos de todos os atendimentos, incluindo aqueles sem OS; não filtrar a conclusão somente pelo dia de abertura.',
-        'Usar corte de acompanhamento e identidade do atendimento; respeitar OS canceladas, pendentes, concluídas depois e sem data.',
-        'Anexar fonte independente da Hubsoft; esta exportação não é evidência de aprovação e não comprova por si a completude dos vínculos.',
+        'Conferir somente OS vinculadas de instalação, retirada/cancelamento ou reativação. Renovação é conferida no próprio atendimento.',
+        'Usar corte de acompanhamento e identidade do atendimento para OS comerciais; respeitar conclusão posterior, pendência, cancelamento e ausência de data.',
+        'OS de suporte, recall, manutenção, migração e checklist ficam na auditoria operacional e não bloqueiam a publicação comercial.',
       ]};
     await db.query('COMMIT');
     return review;
@@ -56,8 +61,60 @@ const cell=value=>String(value??'—').replace(/[|\r\n]/g,' ');
 function table(headers,rows) {
   return ['| '+headers.join(' | ')+' |','| '+headers.map(()=>'---').join(' | ')+' |',...rows.map(row=>'| '+row.map(cell).join(' | ')+' |')].join('\n');
 }
-export function reviewMarkdown(review) {
+export function legacyReviewMarkdown(review) {
   return `# Conferência do piloto Sales\n\nJob: ${review.jobId}. Abertura: ${review.openingDay}. Corte dos vínculos: ${review.followupCutoff}.\n\nDados observados na extração local; não constituem uma fonte independente nem aprovação. Nenhuma consulta Hubsoft é feita por esta exportação. Não presume que o estado atual seja um retrato histórico no corte.\n\n## Resumo\n\n${JSON.stringify(review.counts)}\n\n## Diferença de escopo documentada\n\n${review.scopeReview?table(['Número OS','Motivo','Destino','Tipo','Abertura','Conclusão'],review.scopeReview.reviewedOrders.map(row=>[row.key,row.reason,row.destination,row.orderType,row.openedAt,row.completedAt])):'Sem justificativa de suporte anexada às referências.'}\n\n## Atendimentos incompletos\n\n${table(['ID atendimento','Protocolo','Abertura','Campos ausentes','Conferência na Hubsoft'],review.incompleteAttendances.map(row=>[row.attendanceId,row.protocol,row.openedOn,row.missingFields.join(', '),'Pendente']))}\n\n## OS vinculadas — observações a conferir\n\n${table(['Protocolo atendimento','Número OS','ID OS','Cadastro OS','Início executado','Fim executado','Situação no corte','Conferência independente'],review.linkedOrders.map(row=>[row.protocol,row.orderNumber,row.orderId,row.createdAt,row.executionStartedAt,row.executionFinishedAt,row.outcome,'Pendente']))}\n\n## Todos os atendimentos — inclusive sem OS\n\n${table(['ID atendimento','Protocolo','Abertura','OS declaradas','OS recebidas','Observado em'],review.attendances.map(row=>[row.attendanceId,row.protocol,row.openedOn,row.reportedOrders,row.receivedOrders,row.observedAt]))}\n\n## Como conferir\n\n${review.requiredChecks.map((text,i)=>`${i+1}. ${text}`).join('\n')}\n\nNão copiar os números desta lista para criar uma suposta referência independente. Registrar o resultado da conferência em documento separado com origem e data. As confirmações de aprovação permanecem desmarcadas.\n`;
+}
+
+// This is deliberately shorter than the legacy audit dump. It makes clear to
+// the operator that only commercial OS are candidates for reconciliation;
+// every other link stays in review.json for traceability without becoming a
+// manual gate.
+export function reviewMarkdown(review) {
+  const commercial=review.commercialLinkedOrders??[];
+  const counts=review.counts??{};
+  const unclassified=review.unclassifiedLinkedOrderCount??counts.unclassifiedLinkedOrders??0;
+  const operational=review.operationalLinkedOrderCount??counts.operationalLinkedOrders??0;
+  const incomplete=review.incompleteAttendances??[];
+  const attendances=review.attendances??[];
+  return `# Conferencia do piloto Sales
+
+Job: ${review.jobId}. Abertura: ${review.openingDay}. Corte dos vinculos: ${review.followupCutoff}.
+
+Este arquivo usa apenas o staging local e nao consulta a Hubsoft. Ele nao e uma aprovacao automatica nem uma referencia independente.
+
+## Escopo comercial
+
+- Instalacao: OS do tipo instalacao.
+- Cancelamento: OS de retirada ou cancelamento.
+- Reativacao: OS cujo tipo indique reativacao.
+- Renovacao: somente o atendimento; OS tecnica de troca de aparelho nao entra no indicador.
+
+## Resumo
+
+${JSON.stringify(counts)}
+
+## OS comerciais vinculadas
+
+${commercial.length?table(['Protocolo atendimento','Numero OS','ID OS','Tipo','Cadastro OS','Fim executado','Situacao no corte'],commercial.map(row=>[row.protocol,row.orderNumber,row.orderId,row.commercialKind,row.createdAt,row.executionFinishedAt,row.outcome])):'Nenhuma OS comercial foi classificada neste snapshot.'}
+
+## Auditoria operacional
+
+Foram preservadas ${operational} OS operacionais e ${unclassified} OS sem categoria persistida neste snapshot. Elas ficam em review.json para rastreabilidade, mas nao exigem conferencia manual e nao bloqueiam a publicacao comercial.
+
+## Atendimentos incompletos
+
+${table(['ID atendimento','Protocolo','Abertura','Campos ausentes'],incomplete.map(row=>[row.attendanceId,row.protocol,row.openedOn,row.missingFields.join(', ')]))}
+
+## Todos os atendimentos - inclusive sem OS
+
+${table(['ID atendimento','Protocolo','Abertura','OS declaradas','OS recebidas','Observado em'],attendances.map(row=>[row.attendanceId,row.protocol,row.openedOn,row.reportedOrders,row.receivedOrders,row.observedAt]))}
+
+## Como conferir
+
+${(review.requiredChecks??[]).map((text,i)=>`${i+1}. ${text}`).join('\n')}
+
+Nao usar esta lista para fabricar uma referencia independente. Qualquer aprovacao continua exigindo evidencia de relatorio com origem e data registradas.
+`;
 }
 
 export async function writePilotReview(review,directory) {

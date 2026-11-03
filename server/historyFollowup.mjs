@@ -4,6 +4,18 @@ import {compareHistoryReport} from './historyReconciliation.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const dates=['data_cadastro','data_inicio_programado','data_inicio_executado','data_termino_executado'];
 const statusText=value=>typeof value==='object'&&value!==null ? String(value.descricao??value.nome??value.prefixo??'') : String(value??'');
+const normalized=value=>statusText(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+
+// Follow-ups keep every linked OS for audit. Only these OS categories can
+// support a Sales indicator; renewal is classified from the attendance itself.
+export function commercialFollowupKind(row) {
+  const type=normalized(row.tipo_ordem_servico??row.tipo);
+  if(!type||/\bcheck[\s-]*list\b/.test(type)) return null;
+  if(/\binstalacao\b/.test(type)) return 'installation';
+  if(/\b(?:retirada|cancelamento)\b/.test(type)) return 'cancellation';
+  if(/\breativacao\b/.test(type)) return 'reactivation';
+  return null;
+}
 
 // OS timestamps must contain a time. Offset-bearing ISO values are converted to
 // São Paulo before selecting a day; a date-only timestamp is never padded to 00:00.
@@ -37,13 +49,14 @@ export function followupOrder(raw,parent,cutoff) {
   if(createdOn&&createdOn>cutoff) return null;
   const concludedOn=row.data_termino_executado ? localDay(row.data_termino_executado,true) : null;
   const openedOn=localDay(parent.data_cadastro),observedStatus=statusText(row.status);
-  const normalizedStatus=observedStatus.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+  const normalizedStatus=normalized(observedStatus);
   const outcome=concludedOn ? (concludedOn<openedOn ? 'concluded_before_attendance' : concludedOn<=cutoff ? 'concluded_by_cutoff' : 'concluded_after_cutoff')
     : /cancelad[oa]|cancelled|canceled/.test(normalizedStatus) ? 'cancelled_observed'
     : /finalizad[oa]|concluid[oa]/.test(normalizedStatus) ? 'conclusion_missing'
     : /pendent|abert[oa]|aguard|programad[oa]|agendad[oa]|em execucao|em andamento/.test(normalizedStatus) ? 'pending_observed' : 'unknown_observed';
   // No customer PII or descriptions are needed to review the temporal link.
   return {id_ordem_servico:id,id_atendimento:attendanceId,numero_ordem_servico:String(row.numero_ordem_servico??''),
+    tipo_ordem_servico:statusText(row.tipo_ordem_servico??row.tipo),commercial_kind:commercialFollowupKind(row),
     data_cadastro:row.data_cadastro??'',data_inicio_programado:row.data_inicio_programado??'',
     data_inicio_executado:row.data_inicio_executado??'',data_termino_executado:row.data_termino_executado??'',
     concludedOn,createdOn,openedOn,observedStatus,outcome,
@@ -97,23 +110,38 @@ export async function followupReport(db,jobId,{publishedOnly=false}={}) {
     if(payload.outcome==='concluded_by_cutoff') completionsByDay[payload.concludedOn]=(completionsByDay[payload.concludedOn]??0)+1;
   }
   const withOrders=new Set(orders.map(r=>r.payload.id_atendimento));
+  const hasCommercialRole=payload=>Object.hasOwn(payload,'commercial_kind');
+  const commercialOrders=orders.filter(({payload})=>['installation','cancellation','reactivation'].includes(payload.commercial_kind));
+  const operationalOrders=orders.filter(({payload})=>hasCommercialRole(payload)&&!payload.commercial_kind);
+  // Older staged pilots did not persist the order type. Keep them visible as
+  // unclassified audit rows instead of incorrectly labelling them operational.
+  const unclassifiedOrders=orders.filter(({payload})=>!hasCommercialRole(payload));
   return {jobId,scope:'attendance_cohort_not_production',cutoff:job.manifest.followupCutoff,
     statusBasis:'observed_at_extraction_not_historical_snapshot',attendanceCount:parents.length,orderCount:orders.length,
+    commercialOrderCount:commercialOrders.length,operationalOrderCount:operationalOrders.length,
+    unclassifiedOrderCount:unclassifiedOrders.length,
     attendancesWithoutOrders:parents.filter(p=>!withOrders.has(p.id)).length,outcomes,completionsByDay,
-    attendances:parents,orders:orders.map(({payload,observedAt})=>({...payload,observedAt}))};
+    attendances:parents,orders:orders.map(({payload,observedAt})=>({...payload,observedAt})),
+    commercialOrders:commercialOrders.map(({payload,observedAt})=>({...payload,observedAt})),
+    operationalOrders:operationalOrders.map(({payload,observedAt})=>({...payload,observedAt})),
+    unclassifiedOrders:unclassifiedOrders.map(({payload,observedAt})=>({...payload,observedAt}))};
 }
 
 export async function publishFollowups(db,jobId,month,cutoff,evidence,report) {
-  if(report?.pending) return fail('REFERENCIA_ACOMPANHAMENTO_PENDENTE');
-  if(!evidence||evidence.reportSha256!==report?.fileSha256) return fail('EVIDENCIA_ACOMPANHAMENTO_INVALIDA');
   const parents=(await db.query('SELECT attendance_id FROM history_followup_attendances WHERE job_id=$1 AND month=$2',[jobId,month])).rows;
   const selected=(await db.query("SELECT upstream_id FROM history_records WHERE job_id=$1 AND month=$2 AND kind='attendance'",[jobId,month])).rows;
   const selectedIds=new Set(selected.map(r=>r.upstream_id));
   if(parents.length!==selectedIds.size||parents.some(r=>!selectedIds.has(r.attendance_id))) return fail('ACOMPANHAMENTO_INCOMPLETO');
   const actual=(await db.query(`SELECT o.order_id AS upstream_id,o.payload FROM history_followup_orders o JOIN history_followup_attendances a
     ON a.job_id=o.job_id AND a.attendance_id=o.attendance_id WHERE o.job_id=$1 AND a.month=$2`,[jobId,month])).rows;
-  const comparison=compareHistoryReport('serviceOrders',actual,evidence,report);
-  if(comparison.status!=='matched') return fail('RECONCILIACAO_ACOMPANHAMENTO_DIVERGENTE');
+  // Follow-up rows are an operational audit, never production rows. A pending
+  // follow-up reference cannot block a commercial publication. If supplied,
+  // an independent reference still receives the strict comparison below.
+  if(!report?.pending) {
+    if(!evidence||evidence.reportSha256!==report?.fileSha256) return fail('EVIDENCIA_ACOMPANHAMENTO_INVALIDA');
+    const comparison=compareHistoryReport('serviceOrders',actual,evidence,report);
+    if(comparison.status!=='matched') return fail('RECONCILIACAO_ACOMPANHAMENTO_DIVERGENTE');
+  }
   await db.query(`INSERT INTO attendance_followup_snapshots(attendance_id,cutoff,opened_on,observed_at,job_id)
     SELECT attendance_id,$3::date,opened_on,observed_at,job_id FROM history_followup_attendances WHERE job_id=$1 AND month=$2
     ON CONFLICT(attendance_id,cutoff) DO UPDATE SET observed_at=excluded.observed_at,job_id=excluded.job_id`,[jobId,month,cutoff]);
@@ -123,5 +151,6 @@ export async function publishFollowups(db,jobId,month,cutoff,evidence,report) {
   await db.query(`INSERT INTO attendance_order_followups(attendance_id,cutoff,order_id,payload)
     SELECT o.attendance_id,$3::date,o.order_id,o.payload FROM history_followup_orders o JOIN history_followup_attendances a
     ON a.job_id=o.job_id AND a.attendance_id=o.attendance_id WHERE o.job_id=$1 AND a.month=$2`,[jobId,month,cutoff]);
-  return {attendanceCount:(await db.query('SELECT count(*)::int AS n FROM history_followup_attendances WHERE job_id=$1 AND month=$2',[jobId,month])).rows[0].n,orderCount:actual.length};
+  return {attendanceCount:(await db.query('SELECT count(*)::int AS n FROM history_followup_attendances WHERE job_id=$1 AND month=$2',[jobId,month])).rows[0].n,
+    orderCount:actual.length,validation:report?.pending?'observational':'reconciled'};
 }
