@@ -85,10 +85,6 @@ function extractTicketIds(combinedText: string): ReadonlyArray<string> {
   return [...combinedText.matchAll(/(?:ticket|protocolo\s+blip)\s*:?\s*#\s*(\d+)/gi)].map((match) => match[1]);
 }
 
-function extractReferencedTicketIds(combinedText: string): ReadonlyArray<string> {
-  return [...new Set([...combinedText.matchAll(/#\s*(\d{4,8})/g)].map((match) => match[1]))];
-}
-
 function eventCustomerKey(row: RowRecord): string {
   return text(row, "codigo_cliente") || normalize(text(row, "nome_razaosocial")) || "cliente-nao-informado";
 }
@@ -315,37 +311,6 @@ function locationFromAttendance(row: RowRecord, order: ServiceOrder | undefined,
   return known.find((location) => normalizedText.includes(normalize(location))) ?? "Não informada";
 }
 
-function isNegativeOutcome(combinedText: string): boolean {
-  const normalized = normalize(combinedText);
-  return /n[aã]o foi realizad|sem prosseguimento|n[aã]o foi poss[ií]vel|n[aã]o p[oô]de ser conclu[ií]d|sem sucesso|falta de retorno|n[aã]o houve retorno|n[aã]o respondeu|n[aã]o deu continuidade|n[aã]o foi efetivad|n[aã]o deseja|n[aã]o pretende|n[aã]o possui interesse|n[aã]o retornou|j[aá] havia sido realizada anteriormente/.test(normalized);
-}
-
-function isSuccessfulRenewal(combinedText: string): boolean {
-  if (isNegativeOutcome(combinedText)) return false;
-  const normalized = normalize(combinedText);
-  return /(?:foi|foram) (?:realizad[oa]s?|aplicad[oa]s?|efetuad[oa]s?|concedid[oa]s?) (?:a |o )?(?:renova[cç][aã]o|bonifica[cç][aã]o|b[oô]nus|altera[cç][aã]o|benef[ií]cio)/.test(normalized)
-    || /mediante (?:a )?renova[cç][aã]o/.test(normalized)
-    || /(?:cliente|titular)[^.]{0,160}aceitou (?:a )?oferta/.test(normalized)
-    || /b[oô]nus foi aplicad[oa]|contrato foi renovad[oa]/.test(normalized);
-}
-
-function isTitleTransfer(combinedText: string): boolean {
-  const normalized = normalize(combinedText);
-  return /(?:alteracao|troca|transferencia).{0,45}(?:titular|titularidade)|(?:novo|antigo) titular/.test(normalized);
-}
-
-function renewalTicketsWithExplicitCommercialAction(rows: ReadonlyArray<RowRecord>): ReadonlySet<string> {
-  const tickets = new Set<string>();
-  for (const row of rows) {
-    const combined = `${text(row, "descricao_abertura")} ${text(row, "descricao_fechamento")}`;
-    const normalized = normalize(combined);
-    const hasRenewal = /\brenova(cao|r|do|da)|renovad[oa]\b/.test(normalized);
-    if (isTitleTransfer(combined) || !hasRenewal || !isSuccessfulRenewal(combined)) continue;
-    for (const ticket of extractReferencedTicketIds(combined)) tickets.add(ticket);
-  }
-  return tickets;
-}
-
 function hasAlternativeToCancellation(combinedText: string): boolean {
   const normalized = normalize(combinedText);
   return /(?:foi )?realizad[oa] (?:a )?alteracao (?:do|de) plano|mediante renovacao contratual/.test(normalized)
@@ -422,6 +387,13 @@ function isInstallationAttendance(row: RowRecord): boolean {
   return category === "instalacao";
 }
 
+// Renovação é uma métrica de atendimento, não de texto livre nem de OS. O
+// mesmo campo e valor do relatório oficial são usados para manter a contagem
+// auditável: Tipo de Atendimento = RENOVAÇÃO DE CONTRATO.
+function isRenewalAttendance(row: RowRecord): boolean {
+  return /\brenovacao de contrato\b/.test(normalize(text(row, "tipo_atendimento")));
+}
+
 function isReactivationServiceOrder(row: RowRecord): boolean {
   return /\breativacao\b/.test(normalize(text(row, "tipo_ordem_servico")));
 }
@@ -440,7 +412,6 @@ export function classifyCommercialRows(
   // Preserve the raw volume; checklists cannot supply links or commercial evidence.
   const commercialOsRows = osRows.filter(row => !isChecklistOrder(row));
   const orders = orderIndex(commercialOsRows);
-  const explicitRenewalTickets = renewalTicketsWithExplicitCommercialAction(attendanceRows.filter(eligibleForClassification));
   const sales: ClassifiedSale[] = [];
   const renewals: ClassifiedRenewal[] = [];
   const cancellations: ClassifiedCancellation[] = [];
@@ -464,10 +435,7 @@ export function classifyCommercialRows(
     const seller = resolveSeller(row, combined);
     const plan = extractPlan(combined);
 
-    const hasRenewal = /\brenova(cao|r|do|da)|renovad[oa]\b/.test(normalized);
-    const titleTransferWithoutCommercialCompanion = isTitleTransfer(combined)
-      && !extractReferencedTicketIds(combined).some((ticket) => explicitRenewalTickets.has(ticket));
-    if (hasRenewal && isSuccessfulRenewal(combined) && !titleTransferWithoutCommercialCompanion) {
+    if (isRenewalAttendance(row)) {
       const benefit = extractBenefit(combined);
       renewals.push({
         id: protocol,
