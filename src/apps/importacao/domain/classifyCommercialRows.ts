@@ -454,7 +454,8 @@ export function classifyCommercialRows(
 
     const hasCancellation = /\bcancela(mento|r|do|da)|cancelou\b/.test(normalized)
       || /retirada/.test(normalize(linkedOrder?.type ?? ""));
-    if (hasCancellation) {
+    const cancellationCompleted = hasCancellation && isCompletedCancellation(combined, linkedOrder);
+    if (cancellationCompleted) {
       const reason = extractCancellationReason(combined);
       cancellations.push({
         id: protocol,
@@ -464,7 +465,7 @@ export function classifyCommercialRows(
         reasonId: reason.id,
         reasonLabel: reason.label,
         location: locationFromAttendance(row, linkedOrder, combined),
-        completed: isCompletedCancellation(combined, linkedOrder),
+        completed: true,
       });
       classifiedProtocols.add(protocol);
     }
