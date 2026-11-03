@@ -27,7 +27,8 @@ test('rascunho abandonado fica na origem, mas nao no volume de atendimentos nem 
 test('renovações seguem somente o tipo de atendimento usado no relatório oficial',()=>{
   const renewal={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:'Cliente aceitou bônus de velocidade'};
   const unrelated={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'SUPORTE',descricao_abertura:'Cliente perguntou sobre renovação e bônus'};
-  const result=classifyCommercialRows(worksheet([renewal,unrelated]),worksheet([orderFixture]));
+  const unsuccessful={...attendanceFixture,id_atendimento:'104',protocolo:'202610010004',tipo_atendimento:'RENOVAÇÃO DE CONTRATO NÃO REALIZADO',descricao_abertura:'Cliente não aceitou a oferta'};
+  const result=classifyCommercialRows(worksheet([renewal,unrelated,unsuccessful]),worksheet([orderFixture]));
   assert.equal(result.renewals.length,1);
   assert.equal(result.renewals[0].id,renewal.protocolo);
 });

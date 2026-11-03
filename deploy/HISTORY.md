@@ -229,3 +229,9 @@ No Sales, as OS comerciais vinculadas são somente: **instalação**, **retirada
 Quando uma referência de OS contiver chaves não comerciais explicitamente documentadas, o sistema preserva a divergência bruta (`rawStatus` e `rawBlocker`) para auditoria e usa o conjunto comercial para a decisão de publicação. Isso nunca remove bloqueio por campo de data incompatível. Snapshots antigos que ainda não preservaram o tipo da OS aparecem como `unclassified` e também são apenas auditoria; não se deve inferir sua categoria retroativamente.
 
 Atendimentos marcados pela Hubsoft como `rascunho=Sim`, sem descrição, sem tipo e com zero OS são rascunhos abandonados. Eles permanecem no staging e em `source_records` para auditoria, mas recebem `classification_status=discarded_draft` e ficam fora do volume de atendimentos e de todos os indicadores. A regra é deliberadamente restrita: um rascunho com conteúdo ou OS não é descartado automaticamente.
+
+### Período publicado e consulta manual
+
+O seletor de período do painel consulta somente a base publicada. A consulta manual por dia é opcional e fica em `publication_scope=manual_staging`: seus registros são preservados para diagnóstico, mas não podem mudar vendas, renovações, cancelamentos ou reativações sem uma publicação reconciliada. Uma consulta manual também não sobrescreve um registro já publicado com ID Hubsoft canônico.
+
+Ao atualizar esta regra, executar `dc run --rm --no-deps history rebuild-metrics`. O comando marca apenas os registros legados sem ID canônico como `manual_staging`, recalcula `commercial_records` dentro de uma transação e imprime as contagens resultantes. Não chama a Hubsoft, não remove registros brutos e não cria duplicidade.

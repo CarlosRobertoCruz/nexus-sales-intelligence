@@ -16,10 +16,12 @@ try {
       try {
         await db.query('BEGIN');
         await db.query('SELECT pg_advisory_xact_lock(73190602)');
-        const result=await (await import('../records.mjs')).rebuild(db);
+        const {quarantineLegacyManualRows,rebuild}=await import('../records.mjs');
+        const quarantinedManualRows=await quarantineLegacyManualRows(db);
+        const result=await rebuild(db);
         const metrics=(await db.query("SELECT kind,count(*)::int AS records FROM commercial_records GROUP BY kind ORDER BY kind")).rows;
         await db.query('COMMIT');
-        console.log(JSON.stringify({...result,metrics},null,2));
+        console.log(JSON.stringify({...result,quarantinedManualRows,metrics},null,2));
       } catch(error) {
         await db.query('ROLLBACK');
         throw error;

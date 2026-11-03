@@ -80,7 +80,7 @@ export function HubsoftSyncControl({
       setRestart(false);
       if (result.published) await onUpdated();
       setMessage(
-        `${result.records} registros processados em ${result.pages} páginas${result.requests !== undefined ? `, com ${result.requests} consultas` : ""}. ${result.complete ? (result.published ? "Dia concluído e painel atualizado." : "Dia concluído. Ainda faltam atendimentos ou OS na base para calcular os indicadores.") : "Consulta pausada no limite seguro. Os nomes já resolvidos foram preservados. Clique em consultar para continuar."}`,
+        `${result.records} registros processados em ${result.pages} páginas${result.requests !== undefined ? `, com ${result.requests} consultas` : ""}. ${result.complete ? "Dia concluído e preservado para revisão. O período publicado não foi alterado." : "Consulta pausada no limite seguro. Os nomes já resolvidos foram preservados. Clique em consultar para continuar."}`,
       );
     } catch (error) {
       setFailed(true);
