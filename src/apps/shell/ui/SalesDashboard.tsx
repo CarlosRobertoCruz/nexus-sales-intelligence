@@ -5,7 +5,6 @@ import { CancellationsPage } from "@/apps/cancelamentos/ui/CancellationsPage";
 import { TeamPage } from "@/apps/equipeComercial/ui/TeamPage";
 import { useSpreadsheetImportController } from "@/apps/importacao/controller/useSpreadsheetImportController";
 import { CommercialPeriodSelector } from "@/apps/importacao/ui/CommercialPeriodSelector";
-import { SpreadsheetImportControl } from "@/apps/importacao/ui/SpreadsheetImportControl";
 import { LocalitiesPage } from "@/apps/localidades/ui/LocalitiesPage";
 import { AppShell } from "@/apps/shell/ui/AppShell";
 import type { AppPage } from "@/apps/shell/copy/appShellCopy";
@@ -36,9 +35,6 @@ export default function DashboardApp() {
     <AppShell
       activePage={activePage}
       onNavigate={setActivePage}
-      importControl={
-        <SpreadsheetImportControl controller={spreadsheetImport} />
-      }
     >
       {activePage === "locations" && (
         <LocalitiesPage

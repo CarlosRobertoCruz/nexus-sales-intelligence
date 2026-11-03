@@ -19,7 +19,6 @@ import { APP_SHELL_COPY, type AppPage } from "../copy/appShellCopy";
 type AppShellProps = {
   activePage: AppPage;
   onNavigate: (page: AppPage) => void;
-  importControl: ReactNode;
   children: ReactNode;
 };
 
@@ -36,7 +35,6 @@ const navIcons: ReadonlyArray<ReactNode> = [
 export function AppShell({
   activePage,
   onNavigate,
-  importControl,
   children,
 }: AppShellProps) {
   return (
@@ -129,8 +127,6 @@ export function AppShell({
                 })}
             </Stack>
           </nav>
-
-          {importControl}
         </Stack>
       </aside>
       {children}
