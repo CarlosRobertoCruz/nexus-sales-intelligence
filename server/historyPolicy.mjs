@@ -31,7 +31,10 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   if(!['data_cadastro','data_inicio_programado','data_termino_executado'].includes(m.osDateField)) return fail('FILTRO_OS_INVALIDO');
   for(const reports of m.phase==='history'?monthsFor(m).map(month=>m.monthReports?.[month]):[m.reports]) for(const kind of ['attendance','serviceOrders',...(m.followupCutoff ? ['followup'] : [])]) {
     const report=reports?.[kind];
-    const pending=kind==='followup'&&m.phase==='day'&&report?.pending===true&&!m.autoPublish;
+    // A monthly run may collect the follow-up cohort before its independent
+    // reference is ready. It can never auto-publish in that state: approval
+    // still requires a complete reference and matching evidence.
+    const pending=kind==='followup'&&['day','october'].includes(m.phase)&&report?.pending===true&&!m.autoPublish;
     if(report?.pending===true&&!pending) return fail('REFERENCIA_PENDENTE_NAO_PERMITIDA');
     if(!pending && (!report || typeof report.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(report.fileSha256)||!report.filters||typeof report.filters!=='object'||!report.exportedAt)) return fail('RELATORIOS_OBRIGATORIOS');
     if(!report?.filters) return fail('RELATORIOS_OBRIGATORIOS');

@@ -90,10 +90,22 @@ def read_report(path, identity, date_field, extra_fields=()):
 
 
 def prepare(args):
-    pilot = date.fromisoformat(args.day)
     snapshot, followup = date.fromisoformat(args.snapshot_date), date.fromisoformat(args.followup_cutoff)
-    if pilot.year != 2026 or pilot.month != 10 or not pilot <= followup < snapshot or followup.year != 2026:
-        raise ValueError('PERIODO_PILOTO_INVALIDO')
+    max_calls = args.max_calls if args.max_calls is not None else (500 if args.phase == 'day' else 5000)
+    if not 1 <= max_calls <= 100000:
+        raise ValueError('ORCAMENTO_CHAMADAS_INVALIDO')
+    if args.phase == 'day':
+        if not args.day:
+            raise ValueError('DIA_PILOTO_OBRIGATORIO')
+        selected_day = date.fromisoformat(args.day)
+        cutoff = selected_day
+        if selected_day.year != 2026 or selected_day.month != 10 or not selected_day <= followup < snapshot or followup.year != 2026:
+            raise ValueError('PERIODO_PILOTO_INVALIDO')
+    else:
+        cutoff = date.fromisoformat(args.cutoff)
+        selected_day = None
+        if cutoff != date(2026, 10, 31) or not args.approved_day_job or not cutoff <= followup < snapshot or followup.year != 2026:
+            raise ValueError('PERIODO_OUTUBRO_INVALIDO')
     a, a_source = read_report(Path(args.attendance), 'protocolo', 'data_cadastro')
     o, o_source = read_report(Path(args.orders), 'numero_ordem_servico', 'data_termino_executado')
     references = {}
@@ -101,16 +113,24 @@ def prepare(args):
         ('attendance', a, a_source, 'data_cadastro', 'protocolo', 'data_cadastro'),
         ('serviceOrders', o, o_source, 'data_termino_executado', 'numero_ordem_servico', args.os_export_date_field),
     ]:
-        references[kind] = {**source, 'exportedAt': args.snapshot_date, 'exportedAtPrecision': 'day',
-            'keyField': identity, 'keys': sorted(row['key'] for row in records if row['day'] == args.day),
+        exported_at = args.attendance_exported_at if kind == 'attendance' else args.orders_exported_at
+        selected = records if args.phase == 'october' else [row for row in records if row['day'] == args.day]
+        references[kind] = {**source, 'exportedAt': exported_at or args.snapshot_date, 'exportedAtPrecision': 'instant' if exported_at else 'day',
+            'keyField': identity, 'keys': sorted(row['key'] for row in selected),
             'filters': {'dateField': field, 'otherFilters': 'none'},
             'exportFilters': {'dateField': exported_field, 'start': '2026-10-01', 'end': '2026-10-31', 'otherFilters': 'none'}}
     references['attendance']['filters']['addressType'] = 'instalacao'
     references['attendance']['exportFilters']['addressType'] = 'instalacao'
+    references['serviceOrders']['filters']['addressType'] = 'instalacao'
+    references['serviceOrders']['exportFilters']['addressType'] = 'instalacao'
     references['followup'] = {'pending': True, 'keyField': 'numero_ordem_servico',
         'filters': {'dateField': 'data_cadastro', 'otherFilters': 'none', 'relationship': 'id_atendimento', 'followupCutoff': args.followup_cutoff}}
-    manifest = {'year': 2026, 'phase': 'day', 'peakDay': args.day, 'cutoff': args.day,
-        'followupCutoff': args.followup_cutoff, 'osDateField': 'data_termino_executado', 'maxCalls': 500, 'reports': references}
+    manifest = {'year': 2026, 'phase': args.phase, 'cutoff': cutoff.isoformat(),
+        'followupCutoff': args.followup_cutoff, 'osDateField': 'data_termino_executado', 'maxCalls': max_calls, 'reports': references}
+    if args.phase == 'day':
+        manifest['peakDay'] = selected_day.isoformat()
+    else:
+        manifest['approvedDayJob'] = args.approved_day_job
     evidence = {'month': '2026-10', 'reviewer': None, 'confirmFilters': False, 'confirmIncompleteRecords': False,
         **{kind: {'reportSha256': references[kind]['fileSha256'], 'keys': references[kind]['keys']} for kind in ['attendance', 'serviceOrders']}}
     target = Path(args.output)
@@ -120,7 +140,7 @@ def prepare(args):
         with path.open('x', encoding='utf-8') as output:
             json.dump(value, output, ensure_ascii=False, indent=2)
             output.write('\n')
-    print(json.dumps({'pilot': args.day, 'attendanceReferenceCount': len(references['attendance']['keys']),
+    print(json.dumps({'phase': args.phase, 'cutoff': cutoff.isoformat(), 'maximumCalls': max_calls, 'attendanceReferenceCount': len(references['attendance']['keys']),
         'osReferenceCount': len(references['serviceOrders']['keys']), 'osExportDateField': args.os_export_date_field,
         'followupReference': 'pending', 'enabled': False}, ensure_ascii=False))
 
@@ -129,9 +149,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--attendance', required=True)
     parser.add_argument('--orders', required=True)
-    parser.add_argument('--day', required=True)
+    parser.add_argument('--phase', choices=['day', 'october'], default='day')
+    parser.add_argument('--day')
+    parser.add_argument('--cutoff', default='2026-10-31')
+    parser.add_argument('--approved-day-job')
     parser.add_argument('--snapshot-date', required=True)
     parser.add_argument('--followup-cutoff', required=True)
+    parser.add_argument('--attendance-exported-at')
+    parser.add_argument('--orders-exported-at')
     parser.add_argument('--os-export-date-field', required=True, choices=['data_cadastro', 'data_inicio_programado', 'data_termino_executado'])
+    parser.add_argument('--max-calls', type=int)
     parser.add_argument('--output', required=True)
     prepare(parser.parse_args())
