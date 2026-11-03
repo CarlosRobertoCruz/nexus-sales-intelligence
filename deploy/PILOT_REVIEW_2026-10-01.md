@@ -57,3 +57,7 @@ O total de 43 corresponde à observação capturada na extração, não a uma re
 ## Encerramento e próxima fase
 
 Ainda será necessário registrar a aceitação de escopo na publicação, o resultado da revisão dos campos e a evidência independente dos vínculos. A aprovação transacional atual não é relaxada por esta entrega: `publishable` continua falso enquanto os bloqueios existirem. Não avançar para outubro completo ou janeiro–setembro nesta etapa. Outubro fechado também exige que 31/10 tenha terminado. Nenhuma migração, consulta remota ou carga nova é necessária para gerar este pacote; somente reconstruir a imagem da API e exportar a leitura local.
+
+## Regra atual de escopo comercial
+
+Esta revisão não exige mais conferir manualmente os 43 vínculos como condição de publicação. A lista integral permanece auditável, mas só OS de instalação, retirada/cancelamento e reativação são candidatas a um indicador comercial. Renovação é reconhecida pelo atendimento de renovação, não por OS de troca técnica de aparelho. Checklists e a OS pontual de suporte ficam fora do indicador e não bloqueiam a carga. Os três atendimentos com campos incompletos e os relatórios de produção ainda exigem as validações expressas no fluxo.

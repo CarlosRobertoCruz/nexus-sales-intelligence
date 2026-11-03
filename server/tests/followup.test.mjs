@@ -6,7 +6,7 @@ process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
 process.env.TZ='America/Sao_Paulo';
 const {pool}=await import('../db.mjs');
 const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
-const {followupReport,orderDate,followupOrder}=await import('../historyFollowup.mjs');
+const {followupReport,orderDate,followupOrder,commercialFollowupKind}=await import('../historyFollowup.mjs');
 const {validateManifest}=await import('../historyPolicy.mjs');
 const {rebuild}=await import('../records.mjs');
 const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
@@ -78,6 +78,11 @@ test('OS preserva hora, converte offset para São Paulo e não inventa datas par
   assert.equal(followupOrder(cancelled,attendance,'2026-10-27').outcome,'cancelled_observed');
   assert.equal(followupOrder({...os,data_termino_executado:'28/10/2026 10:00:00'},attendance,'2026-10-27').outcome,'concluded_after_cutoff');
   assert.equal(followupOrder(createdAfterCutoff,attendance,'2026-10-27'),null);
+  assert.equal(commercialFollowupKind(os),'installation');
+  assert.equal(commercialFollowupKind({...os,tipo:'RETIRADA DE EQUIPAMENTO'}),'cancellation');
+  assert.equal(commercialFollowupKind({...os,tipo:'REATIVACAO DE CONTRATO'}),'reactivation');
+  assert.equal(commercialFollowupKind({...os,tipo:'TROCA DE APARELHO POR RENOVACAO'}),null);
+  assert.equal(commercialFollowupKind({...os,tipo:'CHECKLIST DE INSTALACAO'}),null);
 });
 
 test('dia 15: produção por conclusão separada dos vínculos futuros, sem atribuir OS ao cliente errado',async()=>fixture(async db=>{
@@ -154,20 +159,17 @@ test('conferência por planilha é local, mantém IDs canônicos e não publica 
   assert.equal(partial.publishable,false);
   assert.equal(partial.reports.attendance.status,'matched');
   assert.equal(partial.reports.serviceOrders.blocker,'ESCOPO_RELATORIO_NAO_COMPARAVEL');
-  assert.equal(partial.reports.followup.blocker,'REFERENCIA_ACOMPANHAMENTO_PENDENTE');
+  assert.equal(partial.reports.followup.status,'observed');
+  assert.equal(partial.reports.followup.auditOnly,true);
   const proof={...evidence,attendance:{reportSha256:refs.attendance.fileSha256,keys:refs.attendance.keys},serviceOrders:{reportSha256:refs.serviceOrders.fileSha256,keys:refs.serviceOrders.keys}};
-  await assert.rejects(approveHistoryMonth(db,id,proof),/ACOMPANHAMENTO_PENDENTE/);
-  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
-  refs.followup={...manifest.reports.followup,keyField:'numero_ordem_servico',keys:evidence.followup.ids};
-  await attachHistoryReports(db,id,refs);
-  await assert.rejects(approveHistoryMonth(db,id,{...proof,followup:{reportSha256:refs.followup.fileSha256,keys:refs.followup.keys}}),/ESCOPO_RELATORIO/);
+  await assert.rejects(approveHistoryMonth(db,id,proof),/ESCOPO_RELATORIO/);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
   refs.serviceOrders.exportFilters.dateField='data_termino_executado';
   await attachHistoryReports(db,id,refs);
   const result=await historyReconciliation(db,id);
   assert.equal(result.publishable,true);
   assert.deepEqual(result.reports.attendance.mapping.map(r=>r.id),['101','102']);
-  await approveHistoryMonth(db,id,{...proof,followup:{reportSha256:refs.followup.fileSha256,keys:refs.followup.keys}});
+  await approveHistoryMonth(db,id,proof);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,5);
   await assert.rejects(attachHistoryReports(db,id,refs),/ESTADO_NAO_PERMITE/);
 }));

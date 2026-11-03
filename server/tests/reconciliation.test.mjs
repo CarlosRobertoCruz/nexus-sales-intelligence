@@ -84,7 +84,8 @@ test('revisão pontual explica suporte e checklists sem aprovar divergência da 
   assert.equal(result.commercialScope.expected,2);assert.equal(result.commercialScope.actual,2);assert.deepEqual(result.commercialScope.missing,[]);
   assert.deepEqual(result.commercialScope.reviewedOutOfScopeKeys,['300']);assert.deepEqual(result.missing,['200','300']);
   assert.equal(result.scopeReview.status,'explained_not_approved');assert.equal(result.scopeReview.publicationApproved,false);
-  assert.equal(result.status,'divergent');assert.equal(result.blocker,'ESCOPO_DESTINO_NAO_COMPARAVEL');
+  assert.equal(result.status,'matched');assert.equal(result.blocker,null);
+  assert.equal(result.rawStatus,'divergent');assert.equal(result.rawBlocker,'ESCOPO_DESTINO_NAO_COMPARAVEL');
   const missingMore={...ref,keys:[...ref.keys,'400']};
   assert.equal(compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:missingMore.keys},missingMore).scopeReview.status,'pending');
 });
