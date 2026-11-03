@@ -32,13 +32,17 @@ test('não aceita trocar a lista vinculada ao relatório, duplicar chaves ou per
   assert.throws(()=>compareHistoryReport('serviceOrders',rows,{...evidence,keys:[9007199254740992]},reference),/IDENTIFICADOR/);
   assert.throws(()=>compareHistoryReport('serviceOrders',[rows[0],rows[0]],evidence,reference),/ID_ORIGEM_DUPLICADO/);
 });
-test('manifesto permite piloto de coleta com referência de acompanhamento pendente, sem publicar automaticamente',()=>{
+test('manifesto permite coleta diária ou mensal com acompanhamento pendente, sem publicar automaticamente',()=>{
   const m={year:2026,phase:'day',peakDay:'2026-10-01',cutoff:'2026-10-01',followupCutoff:'2026-10-28',osDateField:'data_termino_executado',maxCalls:500,
     reports:{attendance:{...reference,keyField:'protocolo',exportedAt:'2026-10-29',filters:{dateField:'data_cadastro',otherFilters:'none',addressType:'instalacao'}},
     serviceOrders:{...reference,exportedAt:'2026-10-29',exportFilters:{dateField:'data_cadastro'}},followup:{pending:true,filters:{dateField:'data_cadastro',otherFilters:'none',relationship:'id_atendimento',followupCutoff:'2026-10-28'}}}};
   assert.equal(validateManifest(m,'2026-10-29').phase,'day');
   assert.throws(()=>validateManifest({...m,autoPublish:true},'2026-10-29'),/REFERENCIA_PENDENTE_NAO_PERMITIDA/);
   assert.throws(()=>validateManifest({...m,reports:{...m.reports,attendance:{...m.reports.attendance,keyField:'nome_razaosocial'}}},'2026-10-29'),/IDENTIDADE/);
+  const october={...m,phase:'october',cutoff:'2026-10-31',followupCutoff:'2026-11-02',approvedDayJob:'11111111-1111-4111-8111-111111111111',
+    reports:{...m.reports,followup:{pending:true,filters:{dateField:'data_cadastro',otherFilters:'none',relationship:'id_atendimento',followupCutoff:'2026-11-02'}}}};
+  assert.equal(validateManifest(october,'2026-11-03').phase,'october');
+  assert.throws(()=>validateManifest({...october,autoPublish:true},'2026-11-03'),/REFERENCIA_PENDENTE_NAO_PERMITIDA/);
 });
 
 test('exclusão comercial de checklist separa a pendência real, sem aprovar reconciliação bruta divergente',()=>{
