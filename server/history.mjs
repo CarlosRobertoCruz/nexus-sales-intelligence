@@ -7,6 +7,7 @@ import { normalizeHubsoft } from './hubsoftAdapter.mjs';
 import { upsertRows,rebuild } from './records.mjs';
 import { projectHistoryRecord } from './historyProjection.mjs';
 import {orderDate,orderDates,stageFollowups,publishFollowups} from './historyFollowup.mjs';
+import {markCapturedDrafts} from './historyDrafts.mjs';
 const codeError=code=>Object.assign(new Error(code),{code});
 const streams=['attendance','attendanceChanges','serviceOrders','serviceOrderCompletions'];
 
@@ -219,6 +220,7 @@ export async function approveHistoryMonth(pool,id,evidence) {
     if(job?.state!=='awaiting_validation') throw codeError('CARGA_NAO_AGUARDA_VALIDACAO');
     const month=monthsFor(job.manifest)[job.month_index];
     if(evidence.month!==month || !evidence.reviewer || evidence.confirmFilters!==true) throw codeError('EVIDENCIA_INVALIDA');
+    const discardedDrafts=await markCapturedDrafts(db,id,month);
     const rows=(await db.query('SELECT kind,upstream_id,payload FROM history_records WHERE job_id=$1 AND month=$2',[id,month])).rows;
     const reports=job.phase==='history'?job.manifest.monthReports[month]:job.manifest.reports;
     const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete').length;
@@ -235,7 +237,7 @@ export async function approveHistoryMonth(pool,id,evidence) {
     // Atualiza os indicadores somente na mesma transação da publicação aprovada.
     await rebuild(db);
     const done=job.month_index+1>=monthsFor(job.manifest).length;
-    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),incompleteAttendances:incomplete,confirmedIncompleteRecords:incomplete?evidence.confirmIncompleteRecords===true:false,attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
+    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),incompleteAttendances:incomplete,discardedDraftAttendances:discardedDrafts.length,confirmedIncompleteRecords:incomplete?evidence.confirmIncompleteRecords===true:false,attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
     await db.query("UPDATE history_jobs SET state=$2,approved=$3,month_index=month_index+1,next_at=now()+interval '5 minutes',error_code=NULL,updated_at=now() WHERE id=$1",[id,done?'complete':'running',done]);
     await db.query('COMMIT');
     return historyStatus(db,id);

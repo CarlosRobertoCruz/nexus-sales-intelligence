@@ -199,7 +199,11 @@ function isCompletedInstallationOrder(order: ServiceOrder): boolean {
 }
 
 function eligibleForClassification(row: RowRecord): boolean {
-  return text(row,"classification_status") !== "incomplete";
+  return !["incomplete", "discarded_draft"].includes(text(row,"classification_status"));
+}
+
+function isDiscardedDraft(row: RowRecord): boolean {
+  return text(row,"classification_status") === "discarded_draft";
 }
 
 function attendanceForInstallationOrder(order: ServiceOrder, attendanceRows: ReadonlyArray<RowRecord>): RowRecord | undefined {
@@ -426,7 +430,9 @@ export function classifyCommercialRows(
   attendance: ImportedWorksheet,
   serviceOrders: ImportedWorksheet,
 ): ClassifiedCommercialImport {
-  const attendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
+  const rawAttendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
+  const discardedDrafts=rawAttendanceRows.filter(isDiscardedDraft);
+  const attendanceRows=rawAttendanceRows.filter(row=>!isDiscardedDraft(row));
   const osRows = deduplicateRows(rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço").filter((row) => /^\d+$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
   if (!attendanceRows.length) throw new Error("Nenhum atendimento válido foi encontrado no arquivo selecionado.");
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
@@ -539,6 +545,7 @@ export function classifyCommercialRows(
   const checklistCount = osRows.length - commercialOsRows.length;
   if (checklistCount) warnings.push(`${checklistCount} OS de checklist preservada(s) no volume bruto e excluída(s) da classificação comercial e dos vínculos usados nos indicadores.`);
   const incompleteAttendances=attendanceRows.filter(row=>!eligibleForClassification(row)).length;
+  if(discardedDrafts.length) warnings.push(`${discardedDrafts.length} rascunho(s) abandonado(s) foram preservados na origem e excluidos de todos os indicadores.`);
   if(incompleteAttendances) warnings.push(`${incompleteAttendances} atendimento(s) com dados incompletos foram contabilizados sem classificação comercial automática. Revise os campos ausentes na origem.`);
   const uniqueSales = deduplicateCommercialEvents(sales);
   const uniqueRenewals = deduplicateCommercialEvents(renewals);

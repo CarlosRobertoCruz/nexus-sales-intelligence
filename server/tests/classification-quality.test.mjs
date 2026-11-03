@@ -17,6 +17,13 @@ test('atendimentos incompletos contam no volume, sem gerar classificação comer
 const attendanceFixture={id_atendimento:'101',protocolo:'202610010001',nome_razaosocial:'Teste',codigo_cliente:'12',descricao_abertura:'Instalação 600 Mega Combo Plus',descricao_fechamento:'',data_cadastro:'01/10/2026',usuario_abertura:'Beatriz',status:'Finalizado',tipo_atendimento:'Instalação'};
 const orderFixture={id_ordem_servico:'201',id_atendimento:'101',numero_ordem_servico:'125',nome_razaosocial:'Teste',codigo_cliente:'12',tipo_ordem_servico:'Instalação',status:'finalizado',data_inicio_programado:'01/10/2026 10:00:00',data_inicio_executado:'01/10/2026 10:00:00',data_termino_executado:'01/10/2026 11:00:00',data_referencia_bi:'data_termino_executado'};
 
+test('rascunho abandonado fica na origem, mas nao no volume de atendimentos nem em indicadores',()=>{
+  const draft={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',descricao_abertura:'',tipo_atendimento:'',quantidade_os:'0',rascunho:'sim',classification_status:'discarded_draft'};
+  const result=classifyCommercialRows(worksheet([attendanceFixture,draft]),worksheet([orderFixture]));
+  assert.equal(result.attendanceRows,1);assert.equal(result.attendance.length,1);
+  assert.equal(result.sales.length,1);assert.ok(result.warnings.some(w=>w.includes('1 rascunho(s) abandonado(s)')));
+});
+
 test('checklists não viram instalações, reativações ou prova de retirada, mas permanecem no volume bruto',()=>{
   for(const type of ['CHECKLIST Instalação','Check-list Reativação','CHECK LIST Retirada']) {
     const a={...attendanceFixture,...(type.includes('Retirada')?{tipo_atendimento:'Cancelamento',descricao_abertura:'Solicita cancelamento'}:{})};

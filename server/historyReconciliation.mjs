@@ -1,4 +1,5 @@
 import {exactId,validateManifest,monthsFor,checklistExclusions,reviewedScopeExclusions} from './historyPolicy.mjs';
+import {capturedDraftAttendanceIds} from './historyDrafts.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const native={attendance:'id_atendimento',serviceOrders:'id_ordem_servico'};
 const business={attendance:'protocolo',serviceOrders:'numero_ordem_servico'};
@@ -88,12 +89,13 @@ export async function historyReconciliation(db,id) {
       :Array.isArray(reference.keys)||Array.isArray(reference.ids)?compareHistoryReport('serviceOrders',cohort,{reportSha256:reference.fileSha256,keys:reference.keys,ids:reference.ids},reference)
       :{status:'blocked',blocker:'CHAVES_RELATORIO_NAO_FORNECIDAS',actual:cohort.length};
   }
-  const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete');
+  const discardedDraftIds=new Set(await capturedDraftAttendanceIds(db,id,month));
+  const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete'&&!discardedDraftIds.has(String(row.upstream_id)));
   const missingFields={};
   for(const row of incomplete) for(const field of String(row.payload.quality_missing_fields??'').split(',')) {
     if(['descricao_abertura','tipo_atendimento'].includes(field)) missingFields[field]=(missingFields[field]??0)+1;
   }
-  const quality={incompleteAttendances:incomplete.length,missingFields,requiresExplicitReview:incomplete.length>0};
+  const quality={incompleteAttendances:incomplete.length,discardedDraftAttendances:discardedDraftIds.size,missingFields,requiresExplicitReview:incomplete.length>0};
   const productionReports=Object.entries(reports).filter(([kind])=>kind!=='followup').map(([,report])=>report);
   return {jobId:id,month,state:job.state,publishable:job.state==='awaiting_validation'&&!incomplete.length&&productionReports.every(r=>r.status==='matched'),quality,reports};
 }

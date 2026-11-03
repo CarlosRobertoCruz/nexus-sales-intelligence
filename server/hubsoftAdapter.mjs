@@ -1,5 +1,6 @@
 import { HubsoftError } from "./hubsoft.mjs";
 import { HubsoftMappingError, requireHubsoftFields } from "./hubsoftDiagnostics.mjs";
+import { isAbandonedAttendanceDraft } from "./historyDrafts.mjs";
 function pick(row, ...paths) {
   for (const path of paths) {
     const val = path.split(".").reduce((o, k) => o?.[k], row);
@@ -94,8 +95,10 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
       data_cadastro: date,
     }, ["protocolo"]);
     const missingBusinessFields=Object.entries({descricao_abertura:description,tipo_atendimento:type}).filter(([,value])=>!value).map(([field])=>field);
+    const abandonedDraft=isAbandonedAttendanceDraft(row);
     return {
-      ...(allowIncompleteBusinessFields&&missingBusinessFields.length?{classification_status:'incomplete',quality_missing_fields:missingBusinessFields.join(',')}:{}),
+      ...(abandonedDraft?{classification_status:'discarded_draft',classification_reason:'abandoned_draft'}:
+        allowIncompleteBusinessFields&&missingBusinessFields.length?{classification_status:'incomplete',quality_missing_fields:missingBusinessFields.join(',')}:{}),
       ...(row.id_atendimento != null ? { id_atendimento:String(row.id_atendimento) } : {}),
       protocolo: protocol,
       nome_razaosocial: customer,
@@ -107,6 +110,7 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
       status: pick(row, "status.descricao", "status.nome", "status"),
       tipo_atendimento: type,
       quantidade_os: pick(row, "ordem_servico_count", "quantidade_os"),
+      rascunho:abandonedDraft?'sim':'nao',
       ...location,
     };
   }
