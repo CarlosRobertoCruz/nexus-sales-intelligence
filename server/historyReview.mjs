@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {monthsFor,exactId} from './historyPolicy.mjs';
 import {followupReport} from './historyFollowup.mjs';
 import {historyReconciliation} from './historyReconciliation.mjs';
+import {capturedDraftAttendanceIds} from './historyDrafts.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const fields=['descricao_abertura','tipo_atendimento'];
@@ -18,7 +19,8 @@ export async function pilotReview(pool,id) {
     const month=monthsFor(job.manifest)[Math.min(job.month_index,monthsFor(job.manifest).length-1)];
     const rows=(await db.query("SELECT upstream_id,payload FROM history_records WHERE job_id=$1 AND month=$2 AND kind='attendance' ORDER BY upstream_id",[id,month])).rows;
     const protocols=new Map(rows.map(row=>[exactId(row.upstream_id),exactId(row.payload.protocolo)]));
-    const incomplete=rows.filter(row=>row.payload.classification_status==='incomplete').map(row=>({
+    const discardedDraftIds=new Set(await capturedDraftAttendanceIds(db,id,month));
+    const incomplete=rows.filter(row=>row.payload.classification_status==='incomplete'&&!discardedDraftIds.has(String(row.upstream_id))).map(row=>({
       attendanceId:exactId(row.upstream_id),protocol:exactId(row.payload.protocolo),openedOn:String(row.payload.data_cadastro),
       missingFields:fields.filter(field=>String(row.payload.quality_missing_fields??'').split(',').includes(field)),
       independentReview:'pending',
@@ -35,7 +37,7 @@ export async function pilotReview(pool,id) {
     const review={jobId:id,month,state:job.state,openingDay:job.manifest.peakDay,followupCutoff:job.manifest.followupCutoff,
       source:'local_staging_not_independent_evidence',publicationApproved:false,
       statusBasis:'observed_at_extraction_not_historical_snapshot',
-      counts:{attendances:rows.length,incompleteAttendances:incomplete.length,followupAttendances:parents.length,linkedOrders:orders.length,
+      counts:{attendances:rows.length,incompleteAttendances:incomplete.length,discardedDraftAttendances:discardedDraftIds.size,followupAttendances:parents.length,linkedOrders:orders.length,
         commercialLinkedOrders:followup.commercialOrderCount,operationalLinkedOrders:followup.operationalOrderCount,
         unclassifiedLinkedOrders:followup.unclassifiedOrderCount,attendancesWithoutOrders:followup.attendancesWithoutOrders},
       scopeReview:reconciliation.reports.serviceOrders.scopeReview??null,

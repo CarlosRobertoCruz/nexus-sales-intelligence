@@ -10,6 +10,7 @@ const {followupReport,orderDate,followupOrder,commercialFollowupKind}=await impo
 const {validateManifest}=await import('../historyPolicy.mjs');
 const {rebuild}=await import('../records.mjs');
 const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
+const {capturedDraftAttendanceIds,markCapturedDrafts}=await import('../historyDrafts.mjs');
 
 const report=(hash,dateField)=>({fileSha256:hash.repeat(64),exportedAt:'2026-10-28T10:00:00Z',filters:{dateField,otherFilters:'none'}});
 const manifest={year:2026,phase:'day',peakDay:'2026-10-15',cutoff:'2026-10-15',followupCutoff:'2026-10-27',osDateField:'data_termino_executado',maxCalls:500,
@@ -58,6 +59,17 @@ async function collect(db,client) {
   for(let i=0;i<24;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
   return {id,status};
 }
+
+test('rascunho abandonado e identificado a partir da pagina capturada antes da publicacao',async()=>fixture(async db=>{
+  const id=await createHistoryJob(db,structuredClone(manifest));
+  const raw={...attendance,descricao_abertura:'',tipo_atendimento:'',ordem_servico_count:0,rascunho:'Sim'};
+  await db.query("INSERT INTO history_pages(job_id,day,stream,page,records,complete,processed) VALUES($1,'2026-10-15','attendance',0,$2::jsonb,true,true)",[id,JSON.stringify([raw])]);
+  await db.query("INSERT INTO history_records(job_id,month,kind,upstream_id,payload,origin) VALUES($1,'2026-10','attendance','101',$2::jsonb,'direct')",[id,JSON.stringify({...attendance,classification_status:'incomplete',quality_missing_fields:'descricao_abertura,tipo_atendimento'})]);
+  assert.deepEqual(await capturedDraftAttendanceIds(db,id,'2026-10'),['101']);
+  assert.deepEqual(await markCapturedDrafts(db,id,'2026-10'),['101']);
+  const saved=(await db.query("SELECT payload FROM history_records WHERE job_id=$1 AND upstream_id='101'",[id])).rows[0].payload;
+  assert.equal(saved.classification_status,'discarded_draft');assert.equal(saved.classification_reason,'abandoned_draft');
+}));
 
 test('corte do acompanhamento exige conclusão, referências próprias e dias completos',()=>{
   assert.equal(validateManifest(manifest,'2026-10-28').peakDay,'2026-10-15');

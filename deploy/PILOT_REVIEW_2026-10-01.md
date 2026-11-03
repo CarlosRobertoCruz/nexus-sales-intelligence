@@ -61,3 +61,5 @@ Ainda será necessário registrar a aceitação de escopo na publicação, o res
 ## Regra atual de escopo comercial
 
 Esta revisão não exige mais conferir manualmente os 43 vínculos como condição de publicação. A lista integral permanece auditável, mas só OS de instalação, retirada/cancelamento e reativação são candidatas a um indicador comercial. Renovação é reconhecida pelo atendimento de renovação, não por OS de troca técnica de aparelho. Checklists e a OS pontual de suporte ficam fora do indicador e não bloqueiam a carga. Os três atendimentos com campos incompletos e os relatórios de produção ainda exigem as validações expressas no fluxo.
+
+Os três atendimentos pendentes serão tratados como rascunhos abandonados somente se a página já capturada confirmar simultaneamente `rascunho=Sim`, descrição e tipo vazios e zero OS. Nessa condição, não entram no volume de atendimentos nem nos indicadores; a página original e o registro bruto continuam preservados para auditoria.
