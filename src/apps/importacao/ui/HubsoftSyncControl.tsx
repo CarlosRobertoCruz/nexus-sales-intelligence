@@ -18,9 +18,11 @@ function displayDay(value: string): string {
 export function HubsoftSyncControl({
   onUpdated,
   disabled,
+  hasPublishedPeriod,
 }: {
   onUpdated: () => Promise<void>;
   disabled: boolean;
+  hasPublishedPeriod: boolean;
 }) {
   const today = new Date();
   const initial = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
@@ -31,6 +33,7 @@ export function HubsoftSyncControl({
   const [lastRun, setLastRun] = useState<LastRun | null>(null);
   const [failed, setFailed] = useState(false);
   const [restart, setRestart] = useState(false);
+  const [expanded, setExpanded] = useState(!hasPublishedPeriod);
   const guard = useRef(false);
   useEffect(() => {
     let active = true;
@@ -94,47 +97,60 @@ export function HubsoftSyncControl({
       aria-busy={busy}
     >
       <div className="sales-sync-heading">
-        <strong>Consulta Hubsoft</strong>
-        <span>Manual</span>
+        <strong>Atualização manual</strong>
+        <span>Opcional</span>
       </div>
-      <label className="sales-sync-date">
-        <span>Dia da consulta</span>
-        <input
-          type="date"
-          value={day}
-          max={initial}
-          onChange={(event) => setDay(event.target.value)}
-          disabled={busy}
-        />
-      </label>
-      <label className="sales-sync-restart">
-        <input
-          type="checkbox"
-          checked={restart}
-          onChange={(event) => setRestart(event.target.checked)}
-          disabled={busy}
-        />
-        <span>Consultar novamente do início</span>
-      </label>
-      <p className="sales-sync-limits">
-        Até 4 consultas por execução, incluindo a busca do nome de abertura.
-        Até 50 registros por página, de um dia por vez.
-      </p>
-      <Button
-        variant="soft"
-        size="sm"
-        fullWidth
-        onPress={() => void sync()}
-        disabled={configured !== true || !day || busy || disabled}
-        style={{ minHeight: 40 }}
-      >
-        <Row align="center" justify="center" gap="8px">
-          <Icon size="xs">
-            <RefreshIcon />
-          </Icon>
-          {busy ? "Consultando…" : "Consultar / continuar"}
-        </Row>
-      </Button>
+      {hasPublishedPeriod && !expanded && (
+        <>
+          <p className="sales-sync-note">O período do painel é escolhido no seletor superior. Esta opção só busca uma atualização pontual na Hubsoft.</p>
+          <Button variant="soft" size="sm" fullWidth onPress={() => setExpanded(true)} disabled={busy || disabled}>
+            Atualizar um dia pela Hubsoft
+          </Button>
+        </>
+      )}
+      {(!hasPublishedPeriod || expanded) && (
+        <>
+          {hasPublishedPeriod && <p className="sales-sync-note">A data abaixo não altera o período exibido no painel.</p>}
+          <label className="sales-sync-date">
+            <span>Dia da atualização manual</span>
+            <input
+              type="date"
+              value={day}
+              max={initial}
+              onChange={(event) => setDay(event.target.value)}
+              disabled={busy}
+            />
+          </label>
+          <label className="sales-sync-restart">
+            <input
+              type="checkbox"
+              checked={restart}
+              onChange={(event) => setRestart(event.target.checked)}
+              disabled={busy}
+            />
+            <span>Consultar novamente do início</span>
+          </label>
+          <p className="sales-sync-limits">
+            Até 4 consultas por execução, incluindo a busca do nome de abertura.
+            Até 50 registros por página, de um dia por vez.
+          </p>
+          <Button
+            variant="soft"
+            size="sm"
+            fullWidth
+            onPress={() => void sync()}
+            disabled={configured !== true || !day || busy || disabled}
+            style={{ minHeight: 40 }}
+          >
+            <Row align="center" justify="center" gap="8px">
+              <Icon size="xs">
+                <RefreshIcon />
+              </Icon>
+              {busy ? "Consultando…" : "Consultar / continuar"}
+            </Row>
+          </Button>
+        </>
+      )}
       {configured === null && (
         <p className="sales-sync-note" role="status">
           Verificando integração…

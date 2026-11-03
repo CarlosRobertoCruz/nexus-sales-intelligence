@@ -1,16 +1,30 @@
 import { readFile,writeFile } from 'node:fs/promises';
 import { validateManifest,monthsFor,daysFor } from '../historyPolicy.mjs';
 const [action='help',argument,evidenceFile]=process.argv.slice(2);
-const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','export-review','reconcile','attach-reports','enable-pilot-protocol'];
+const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','export-review','reconcile','attach-reports','enable-pilot-protocol','rebuild-metrics'];
 let pool;
 try {
-  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; export-review UUID diretorio-novo; attach-reports UUID referencias.json; enable-pilot-protocol UUID'); }
-  else if(!commands.includes(action)||!argument) throw new Error('COMANDO_INVALIDO');
+  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; export-review UUID diretorio-novo; attach-reports UUID referencias.json; enable-pilot-protocol UUID; rebuild-metrics'); }
+  else if(!commands.includes(action)||(!argument&&action!=='rebuild-metrics')) throw new Error('COMANDO_INVALIDO');
   else if(action==='plan') {
     const manifest=validateManifest(JSON.parse(await readFile(argument,'utf8')));
     console.log(JSON.stringify({phase:manifest.phase,cutoff:manifest.cutoff,months:monthsFor(manifest),days:monthsFor(manifest).reduce((n,month)=>n+daysFor(manifest,month).length,0),maximumCalls:manifest.maxCalls,osDateField:manifest.osDateField,followupCutoff:manifest.followupCutoff??null,enabled:false},null,2));
   } else {
     ({pool}=await import('../db.mjs'));
+    if(action==='rebuild-metrics') {
+      const db=await pool.connect();
+      try {
+        await db.query('BEGIN');
+        await db.query('SELECT pg_advisory_xact_lock(73190602)');
+        const result=await (await import('../records.mjs')).rebuild(db);
+        const metrics=(await db.query("SELECT kind,count(*)::int AS records FROM commercial_records GROUP BY kind ORDER BY kind")).rows;
+        await db.query('COMMIT');
+        console.log(JSON.stringify({...result,metrics},null,2));
+      } catch(error) {
+        await db.query('ROLLBACK');
+        throw error;
+      } finally { db.release(); }
+    } else {
     const {createHistoryJob,historyStatus,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
     if(action==='create') console.log(JSON.stringify({id:await createHistoryJob(pool,JSON.parse(await readFile(argument,'utf8')))}));
     else {
@@ -75,6 +89,7 @@ try {
           if(remaining>0) await new Promise(resolve=>setTimeout(resolve,Math.min(remaining,15000)));
         }
       }
+    }
     }
   }
 } catch(error) {

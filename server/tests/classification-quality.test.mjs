@@ -24,6 +24,14 @@ test('rascunho abandonado fica na origem, mas nao no volume de atendimentos nem 
   assert.equal(result.sales.length,1);assert.ok(result.warnings.some(w=>w.includes('1 rascunho(s) abandonado(s)')));
 });
 
+test('renovações seguem somente o tipo de atendimento usado no relatório oficial',()=>{
+  const renewal={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:'Cliente aceitou bônus de velocidade'};
+  const unrelated={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'SUPORTE',descricao_abertura:'Cliente perguntou sobre renovação e bônus'};
+  const result=classifyCommercialRows(worksheet([renewal,unrelated]),worksheet([orderFixture]));
+  assert.equal(result.renewals.length,1);
+  assert.equal(result.renewals[0].id,renewal.protocolo);
+});
+
 test('checklists não viram instalações, reativações ou prova de retirada, mas permanecem no volume bruto',()=>{
   for(const type of ['CHECKLIST Instalação','Check-list Reativação','CHECK LIST Retirada']) {
     const a={...attendanceFixture,...(type.includes('Retirada')?{tipo_atendimento:'Cancelamento',descricao_abertura:'Solicita cancelamento'}:{})};

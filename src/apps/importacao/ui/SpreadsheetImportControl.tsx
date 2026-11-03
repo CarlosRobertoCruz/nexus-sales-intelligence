@@ -93,15 +93,15 @@ export function SpreadsheetImportControl({ controller }: { controller: Spreadshe
       <Surface tone="subtle" padding={TOKENS.spacing[16]} style={{ marginTop: "auto", border: `1px solid ${TOKENS.color.stroke.default}` }}>
         <Stack gap={TOKENS.spacing[10]}>
           <Row align="center" justify="space-between" gap={TOKENS.spacing[8]}>
-            <Text size="xs" weight={700} tone="brand">BASE COMERCIAL</Text>
-            <Badge size="xs" variant={meta ? "success" : "neutral"} dot>{meta ? "ativa" : "vazia"}</Badge>
+            <Text size="xs" weight={700} tone="brand">PERÍODO PUBLICADO</Text>
+            <Badge size="xs" variant={meta ? "success" : "neutral"} dot>{meta ? "disponível" : "sem dados"}</Badge>
           </Row>
           <Stack gap={TOKENS.spacing[3]}>
             <Text size="md" weight={700}>{controller.isHydrating ? "Carregando histórico…" : meta?.referenceMonth ?? SPREADSHEET_IMPORT_COPY.emptyStatus}</Text>
-            <Text size="xs" tone="muted" lineHeight={1.5}>{controller.isHydrating ? "Preparando a base comercial." : meta ? `${meta.quality.attendanceRows.toLocaleString("pt-BR")} atendimentos · ${meta.quality.serviceOrderRows.toLocaleString("pt-BR")} OS` : "Importe os dois relatórios para preencher o painel."}</Text>
+            <Text size="xs" tone="muted" lineHeight={1.5}>{controller.isHydrating ? "Carregando o período publicado." : meta ? `${meta.quality.attendanceRows.toLocaleString("pt-BR")} atendimentos registrados · ${meta.quality.serviceOrderRows.toLocaleString("pt-BR")} OS registradas` : "Ainda não há período publicado para consulta."}</Text>
           </Stack>
           {serverMode && controller.error && !controller.isOpen && <Text size="xs" tone="muted">{controller.error}</Text>}
-          {serverMode && <HubsoftSyncControl onUpdated={controller.refreshCentralData} disabled={controller.isProcessing} />}
+          {serverMode && <HubsoftSyncControl onUpdated={controller.refreshCentralData} disabled={controller.isProcessing} hasPublishedPeriod={Boolean(meta)} />}
           <Button variant="soft" size="md" fullWidth onPress={controller.openImport} disabled={controller.isHydrating}>
             <Row align="center" justify="center" gap={TOKENS.spacing[8]}><Icon size="sm"><DatabaseIcon /></Icon>{SPREADSHEET_IMPORT_COPY.button}</Row>
           </Button>
