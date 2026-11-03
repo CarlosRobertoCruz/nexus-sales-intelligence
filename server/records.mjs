@@ -107,7 +107,20 @@ export async function upsertRows(db, kind, records, source) {
   await db.query(
     `INSERT INTO source_records(kind,id,payload,source)
  SELECT $1,r.id,r.payload,$3 FROM jsonb_to_recordset($2::jsonb) AS r(id text,payload jsonb)
- ON CONFLICT(kind,id) DO UPDATE SET payload=excluded.payload,source=excluded.source,updated_at=now()`,
+ ON CONFLICT(kind,id) DO UPDATE SET
+   payload=CASE
+     WHEN excluded.payload->>'publication_scope'='manual_staging'
+       AND COALESCE(source_records.payload->>'publication_scope','published')='published'
+     THEN source_records.payload
+     ELSE excluded.payload
+   END,
+   source=CASE
+     WHEN excluded.payload->>'publication_scope'='manual_staging'
+       AND COALESCE(source_records.payload->>'publication_scope','published')='published'
+     THEN source_records.source
+     ELSE excluded.source
+   END,
+   updated_at=now()`,
     [kind, JSON.stringify(unique), source],
   );
   const count = Number(
@@ -116,6 +129,23 @@ export async function upsertRows(db, kind, records, source) {
   );
   if (count > MAX_ROWS) throw new Error("BASE_ATINGIU_LIMITE_50000_REGISTROS");
 }
+
+// Versões antigas da sincronização pontual usavam a mesma tabela da base
+// aprovada, mas não recebiam um ID Hubsoft canônico. Elas continuam guardadas
+// para auditoria, porém não podem alterar o painel sem reconciliação.
+export async function quarantineLegacyManualRows(db) {
+  const rows = (await db.query(`UPDATE source_records
+    SET payload=payload||jsonb_build_object('publication_scope','manual_staging')
+    WHERE source='hubsoft'
+      AND id NOT LIKE 'hubsoft:%'
+      AND COALESCE(payload->>'publication_scope','')=''
+    RETURNING kind`)).rows;
+  return rows.reduce((counts, row) => ({
+    ...counts,
+    [row.kind]: (counts[row.kind] ?? 0) + 1,
+  }), {});
+}
+
 function worksheet(records, kind) {
   const required =
     kind === "attendance"
@@ -146,7 +176,9 @@ function worksheet(records, kind) {
 }
 export async function rebuild(db) {
   const raw = (
-    await db.query("SELECT kind,payload FROM source_records ORDER BY kind,id")
+    await db.query(`SELECT kind,payload FROM source_records
+      WHERE COALESCE(payload->>'publication_scope','published') <> 'manual_staging'
+      ORDER BY kind,id`)
   ).rows;
   const a = raw.filter((r) => r.kind === "attendance").map((r) => r.payload),
     o = raw.filter((r) => r.kind === "serviceOrders").map((r) => r.payload);

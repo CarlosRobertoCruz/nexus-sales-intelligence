@@ -11,6 +11,9 @@ const STREAMS = [
   ["serviceOrders", "serviceOrders"],
   ["serviceOrderCompletions", "serviceOrders"],
 ];
+function stageManualRow(row) {
+  return { ...row, publication_scope: "manual_staging" };
+}
 export async function syncDay(day, userId, restart = false) {
   validateDay(day);
   const db = await pool.connect();
@@ -55,7 +58,7 @@ export async function syncDay(day, userId, restart = false) {
         const cache = saved?.page === cursor.page ? saved : { page: cursor.page, names: {} };
         const rows = [];
         for (const record of result.records.filter((r) => !r.deleted_at)) {
-          try { rows.push(normalizeHubsoft(kind, record, userNames)); }
+          try { rows.push(stageManualRow(normalizeHubsoft(kind, record, userNames))); }
           catch (error) {
             const d = error.diagnostic;
             if (kind !== "attendance" || d?.missingFields?.length !== 1 ||
@@ -77,7 +80,7 @@ export async function syncDay(day, userId, restart = false) {
               await db.query(`INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)
                 ON CONFLICT(key) DO UPDATE SET value=excluded.value`, [cacheKey, JSON.stringify(cache)]);
             }
-            rows.push(normalizeHubsoft(kind, { ...record, usuario_abertura: name }, {}));
+            rows.push(stageManualRow(normalizeHubsoft(kind, { ...record, usuario_abertura: name }, {})));
           }
         }
         await db.query("BEGIN");

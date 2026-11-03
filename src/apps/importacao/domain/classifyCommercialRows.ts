@@ -391,7 +391,7 @@ function isInstallationAttendance(row: RowRecord): boolean {
 // mesmo campo e valor do relatório oficial são usados para manter a contagem
 // auditável: Tipo de Atendimento = RENOVAÇÃO DE CONTRATO.
 function isRenewalAttendance(row: RowRecord): boolean {
-  return /\brenovacao de contrato\b/.test(normalize(text(row, "tipo_atendimento")));
+  return normalize(text(row, "tipo_atendimento")) === "renovacao de contrato";
 }
 
 function isReactivationServiceOrder(row: RowRecord): boolean {
