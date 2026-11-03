@@ -39,9 +39,18 @@ test('checklists não viram instalações, reativações ou prova de retirada, m
     const result=classifyCommercialRows(worksheet([a]),worksheet([{...orderFixture,tipo_ordem_servico:type}]));
     assert.equal(result.serviceOrderRows,1);assert.equal(result.serviceOrders.length,1);
     assert.equal(result.linkedServiceOrders,0);assert.equal(result.sales.length,0);assert.equal(result.reactivations.length,0);
-    if(type.includes('Retirada')) {assert.equal(result.cancellations.length,1);assert.equal(result.cancellations[0].completed,false);}
+    if(type.includes('Retirada')) assert.equal(result.cancellations.length,0);
     assert.ok(result.warnings.some(w=>w.includes('1 OS de checklist')));
   }
+});
+
+test('somente cancelamento efetivado entra no indicador',()=>{
+  const requested={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',tipo_atendimento:'SOLICITAÇÃO DE CANCELAMENTO/NÃO REALIZADO',descricao_abertura:'Cliente pediu informações sobre cancelamento.'};
+  const completed={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'CANCELAMENTO',descricao_abertura:'O cancelamento foi realizado com sucesso.'};
+  const result=classifyCommercialRows(worksheet([requested,completed]),worksheet([orderFixture]));
+  assert.equal(result.cancellations.length,1);
+  assert.equal(result.cancellations[0].id,completed.protocolo);
+  assert.equal(result.cancellations[0].completed,true);
 });
 
 test('checklist não encobre OS comercial válida do mesmo atendimento',()=>{
