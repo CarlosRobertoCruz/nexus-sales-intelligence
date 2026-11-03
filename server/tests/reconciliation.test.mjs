@@ -75,3 +75,23 @@ test('referências com exclusões inválidas são recusadas antes de atualizar o
     serviceOrders:{...reference,exportedAt:'2026-10-30',commercialExclusions:{reason:'checklist',keys:['999']}}}};
   assert.throws(()=>validateManifest(m,'2026-10-30'),/EXCLUSOES_COMERCIAIS_INVALIDAS/);
 });
+
+const supportReview={key:'300',reason:'non_commercial_support',orderType:'(SFN) SUPORTE',destination:'SFNCONSULT',openedAt:'17/09/2026 13:42:10',completedAt:'01/10/2026 09:17:45',evidence:{kind:'user_provided_hubsoft_screenshots',reviewedOn:'2026-10-30'}};
+test('revisão pontual explica suporte e checklists sem aprovar divergência da origem',()=>{
+  const ref={...reference,keys:['74','96','200','300'],exportFilters:{dateField:'data_termino_executado',start:'2026-10-01',end:'2026-10-01'},collectionScope:{destination:'cliente_servico'},exportScope:{destination:'all'},
+    commercialExclusions:{reason:'checklist',keys:['200']},scopeReview:{resolved:true,unassignedCustomerKeys:['300'],reviewedOrders:[supportReview]}};
+  const result=compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref);
+  assert.equal(result.commercialScope.expected,2);assert.equal(result.commercialScope.actual,2);assert.deepEqual(result.commercialScope.missing,[]);
+  assert.deepEqual(result.commercialScope.reviewedOutOfScopeKeys,['300']);assert.deepEqual(result.missing,['200','300']);
+  assert.equal(result.scopeReview.status,'explained_not_approved');assert.equal(result.scopeReview.publicationApproved,false);
+  assert.equal(result.status,'divergent');assert.equal(result.blocker,'ESCOPO_DESTINO_NAO_COMPARAVEL');
+  const missingMore={...ref,keys:[...ref.keys,'400']};
+  assert.equal(compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:missingMore.keys},missingMore).scopeReview.status,'pending');
+});
+
+test('revisão de suporte exige origem, destino não comercial, datas e chave específicos',()=>{
+  for(const changes of [{destination:'cliente_servico'},{reason:'ignore'},{key:'999'},{completedAt:'02/10/2026 09:00:00'},{evidence:null}]) {
+    const ref={...reference,keys:['74','96','300'],exportFilters:{dateField:'data_termino_executado',start:'2026-10-01',end:'2026-10-01'},scopeReview:{reviewedOrders:[{...supportReview,...changes}]}};
+    assert.throws(()=>compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref),/REVISAO_ESCOPO_INVALIDA/);
+  }
+});

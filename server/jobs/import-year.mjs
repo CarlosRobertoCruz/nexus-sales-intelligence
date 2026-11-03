@@ -1,10 +1,10 @@
 import { readFile,writeFile } from 'node:fs/promises';
 import { validateManifest,monthsFor,daysFor } from '../historyPolicy.mjs';
 const [action='help',argument,evidenceFile]=process.argv.slice(2);
-const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','reconcile','attach-reports','enable-pilot-protocol'];
+const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','export-review','reconcile','attach-reports','enable-pilot-protocol'];
 let pool;
 try {
-  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; attach-reports UUID referencias.json; enable-pilot-protocol UUID'); }
+  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; export-review UUID diretorio-novo; attach-reports UUID referencias.json; enable-pilot-protocol UUID'); }
   else if(!commands.includes(action)||!argument) throw new Error('COMANDO_INVALIDO');
   else if(action==='plan') {
     const manifest=validateManifest(JSON.parse(await readFile(argument,'utf8')));
@@ -19,6 +19,11 @@ try {
       else if(action==='enable-pilot-protocol') {
         if(process.env.HUBSOFT_HISTORY_ENABLED!=='true'||process.env.HUBSOFT_HISTORY_IP_COORDINATED!=='true'||Number(process.env.HUBSOFT_REQUESTS_PER_SECOND??1)!==1) throw new Error('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
         console.log(JSON.stringify(await enablePilotProtocol(pool,argument),null,2));
+      }
+      else if(action==='export-review') {
+        if(!evidenceFile) throw new Error('DIRETORIO_DESTINO_OBRIGATORIO');
+        const {pilotReview,writePilotReview}=await import('../historyReview.mjs');
+        console.log(JSON.stringify(await writePilotReview(await pilotReview(pool,argument),evidenceFile),null,2));
       }
       else if(action==='reconcile'||action==='attach-reports') {
         const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
