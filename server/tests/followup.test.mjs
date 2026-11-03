@@ -296,3 +296,25 @@ test('dados de negócio realmente ausentes não bloqueiam coleta; publicação e
   const report=await historyReconciliation(db,id);
   assert.equal(report.quality.incompleteAttendances,1);assert.equal(report.quality.requiresExplicitReview,true);
 }));
+
+test('pacote de conferência usa snapshot somente leitura, preserva protocolos, vínculos futuros e não expõe PII',async()=>fixture(async db=>{
+  const {pilotReview}=await import('../historyReview.mjs');
+  const client=fakeClient(),{id}=await collect(db,client);
+  await db.query(`UPDATE history_records SET payload=payload||'{"classification_status":"incomplete","quality_missing_fields":"descricao_abertura,tipo_atendimento"}'::jsonb WHERE job_id=$1 AND kind='attendance' AND upstream_id='101'`,[id]);
+  const calls=client.calls.length;
+  const queries=[];
+  const reader={connect:async()=>{const connection=await db.connect();return {query:(sql,args)=>{queries.push(sql);return connection.query(sql,args);},release:()=>connection.release()};}};
+  const result=await pilotReview(reader,id);
+  assert.equal(result.counts.attendances,2);assert.equal(result.counts.incompleteAttendances,1);assert.equal(result.counts.linkedOrders,5);
+  assert.equal(result.counts.attendancesWithoutOrders,1);assert.equal(result.attendances.length,2);
+  assert.equal(result.incompleteAttendances[0].protocol,attendance.protocolo);
+  assert.equal(result.linkedOrders.find(row=>row.orderNumber==='201').executionFinishedAt,'20/10/2026 10:00:00');
+  assert.equal(result.linkedOrders.find(row=>row.orderNumber==='201').protocol,attendance.protocolo);
+  assert.ok(result.linkedOrders.some(row=>row.outcome==='pending_observed'));
+  assert.equal(result.publicationApproved,false);assert.equal(result.source,'local_staging_not_independent_evidence');
+  const serialized=JSON.stringify(result);
+  for(const forbidden of ['Cliente de teste','Beatriz','Carlos','nome_razaosocial','telefones','descricao_fechamento','usuario_abertura']) assert.ok(!serialized.includes(forbidden),forbidden);
+  assert.equal(client.calls.length,calls);assert.equal(queries[0],'BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+  assert.ok(queries.every(sql=>!/^(INSERT|UPDATE|DELETE|ALTER|DROP)/i.test(sql)));
+  assert.equal((await db.query('SELECT state FROM history_jobs WHERE id=$1',[id])).rows[0].state,'awaiting_validation');
+}));

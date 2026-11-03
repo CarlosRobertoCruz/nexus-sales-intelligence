@@ -215,3 +215,7 @@ Usar esse modo somente para a exportação sem filtro de Destino e com endereço
 Para obter uma referência que comprove a coleta por destino, confirmar na Hubsoft o recorte correspondente a cliente/serviço e exportá-lo; não criar essa referência simplesmente copiando os 16 números do staging. Para os 43 vínculos, usar fonte independente que relacione as OS aos 107 atendimentos e respeite o corte de acompanhamento de 28/10, sem restringir a conclusão ao dia de abertura. O comando `export-followup` exporta observações da coleta, não comprovação independente.
 
 A atualização de código exige build de API e web, pois a classificação é compartilhada. Não requer migração ou nova coleta. Anexar somente `references-conclusion.json` ao mesmo job usando `attach-reports`, após o deploy, para visualizar a divergência correta; não substituir o manifesto salvo, não apagar caches e não executar `start/run` em um piloto que já está aguardando validação. Nenhuma carga de outubro/janeiro-setembro foi autorizada automaticamente por essa conferência.
+
+## Pacote de revisão do piloto diário
+
+A justificativa pontual da OS de suporte e o procedimento de exportação das pendências estão em [PILOT_REVIEW_2026-10-01.md](PILOT_REVIEW_2026-10-01.md). O comando `history export-review UUID diretorio-novo` lê um snapshot somente leitura e gera `review.json` e `conferencia.md`, incluindo protocolos incompletos, todos os atendimentos e OS vinculadas com suas datas. Não consulta Hubsoft, não publica, não inicia o job e não transforma observações locais em evidência independente.

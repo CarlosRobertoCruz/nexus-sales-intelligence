@@ -39,6 +39,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
     if(report.keyField!==undefined&&!identities.includes(report.keyField)) return fail('CAMPO_IDENTIDADE_INVALIDO');
     if(report.keys!==undefined&&(!Array.isArray(report.keys)||report.keys.length>50000||new Set(report.keys.map(exactId)).size!==report.keys.length)) return fail('CHAVES_RELATORIO_DUPLICADAS');
     checklistExclusions(kind,report);
+    reviewedScopeExclusions(kind,report);
     if(report.filters.addressType!==undefined&&report.filters.addressType!=='instalacao') return fail('TIPO_ENDERECO_NAO_MAPEADO');
     if(report.exportFilters?.dateField!==undefined&&!['data_cadastro','data_fechamento','data_inicio_programado','data_termino_executado'].includes(report.exportFilters.dateField)) return fail('CAMPO_DATA_EXPORTACAO_INVALIDO');
     if(report.filters.otherFilters!=='none') return fail('FILTROS_ADICIONAIS_EXIGEM_MAPEAMENTO');
@@ -95,4 +96,29 @@ export function checklistExclusions(kind,reference) {
   const keys=value.keys.map(exactId),source=new Set(reference.keys.map(exactId));
   if(new Set(keys).size!==keys.length||keys.some(key=>!source.has(key))) return fail();
   return new Set(keys);
+}
+
+// Per-record evidence only. Never infer an exclusion from an absent customer.
+export function reviewedScopeExclusions(kind,reference) {
+  const decisions=reference?.scopeReview?.reviewedOrders;
+  if(decisions===undefined) return new Set();
+  const invalid=()=>fail('REVISAO_ESCOPO_INVALIDA');
+  if(kind!=='serviceOrders'||reference.keyField!=='numero_ordem_servico'||!Array.isArray(reference.keys)||!Array.isArray(decisions)||decisions.length>50000) return invalid();
+  const source=new Set(reference.keys.map(exactId)),checklists=checklistExclusions(kind,reference),keys=new Set();
+  for(const item of decisions) {
+    const key=exactId(item?.key);
+    if(!source.has(key)||keys.has(key)||checklists.has(key)||item.reason!=='non_commercial_support'||
+      typeof item.orderType!=='string'||!/suporte/i.test(item.orderType)||
+      typeof item.destination!=='string'||!item.destination.trim()||item.destination.length>150||
+      ['cliente_servico','cliente','servico'].includes(item.destination.toLowerCase().trim())||
+      item.evidence?.kind!=='user_provided_hubsoft_screenshots'||!/^2026-\d{2}-\d{2}$/.test(item.evidence?.reviewedOn??'')) return invalid();
+    try {
+      const [year,month,day]=item.evidence.reviewedOn.split('-');localDay(`${day}/${month}/${year}`);
+      const completion=localDay(item.completedAt,true);localDay(item.openedAt,true);
+      if(reference.exportFilters?.start&&completion<reference.exportFilters.start||reference.exportFilters?.end&&completion>reference.exportFilters.end) return invalid();
+    } catch { return invalid(); }
+    keys.add(key);
+  }
+  if(reference.scopeReview.resolved===true && (reference.scopeReview.unassignedCustomerKeys??[]).some(key=>!keys.has(exactId(key)))) return invalid();
+  return keys;
 }
