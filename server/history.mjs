@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {mergeAttendanceDetail} from './historyAttendanceDetail.mjs';
 import {safeHubsoftDiagnostic,HubsoftMappingError} from './hubsoftDiagnostics.mjs';
 import {compareHistoryReport} from './historyReconciliation.mjs';
-import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt,usesProtocolPilot } from './historyPolicy.mjs';
+import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt,usesProtocolPilot,OCTOBER_PROTOCOL_JOB_ID } from './historyPolicy.mjs';
 import { normalizeHubsoft } from './hubsoftAdapter.mjs';
 import { upsertRows,rebuild } from './records.mjs';
 import { projectHistoryRecord } from './historyProjection.mjs';
@@ -246,16 +246,20 @@ export async function approveHistoryMonth(pool,id,evidence) {
 }
 
 // Records explicit operator approval without starting the worker or clearing caches.
-export async function enablePilotProtocol(pool,id) {
+export function enablePilotProtocol(pool,id) { return enableProtocolException(pool,id,'day'); }
+export function enableOctoberProtocol(pool,id) { return enableProtocolException(pool,id,'october'); }
+async function enableProtocolException(pool,id,phase) {
+  if(phase==='october'&&id!==OCTOBER_PROTOCOL_JOB_ID) throw codeError('EXCECAO_PROTOCOLO_FORA_DE_OUTUBRO');
   const db=await pool.connect();let locked=false;
   try {
     locked=(await db.query('SELECT pg_try_advisory_lock(73190602) AS locked')).rows[0].locked;
     if(!locked) throw codeError('SINCRONIZACAO_EM_ANDAMENTO');
     await db.query('BEGIN');
     const job=(await db.query('SELECT * FROM history_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];
-    if(job?.state!=='paused'||job.phase!=='day'||job.manifest.peakDay!=='2026-10-01') throw codeError('ESTADO_NAO_PERMITE_EXCECAO');
+    if(job?.state!=='paused'||job.phase!==phase||(phase==='day'&&job.manifest.peakDay!=='2026-10-01')) throw codeError('ESTADO_NAO_PERMITE_EXCECAO');
     if(job.manifest.enrichmentStrategy!=='protocol'&&job.error_code!=='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO') throw codeError('ERRO_NAO_PERMITE_EXCECAO');
-    const manifest={...job.manifest,enrichmentStrategy:'protocol',protocolException:{enabled:true,jobId:id,day:job.manifest.peakDay,authorizedAt:new Date().toISOString()}};
+    const scope=phase==='day'?{day:job.manifest.peakDay}:{month:'2026-10'};
+    const manifest={...job.manifest,enrichmentStrategy:'protocol',protocolException:{enabled:true,jobId:id,...scope,authorizedAt:new Date().toISOString()}};
     validateManifest(manifest);
     usesProtocolPilot(manifest,id);
     await db.query('UPDATE history_jobs SET manifest=$2::jsonb,updated_at=now() WHERE id=$1',[id,JSON.stringify(manifest)]);
