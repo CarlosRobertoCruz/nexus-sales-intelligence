@@ -12,12 +12,20 @@ export function localDay(value,requiredTime=false) {
   if(new Date(day+'T12:00:00Z').toISOString().slice(0,10)!==day || +h>23 || +mi>59 || +s>59) return fail('HUBSOFT_DATA_NAO_RECONHECIDA');
   return day;
 }
-// Opt-in permission is bound to the existing daily pilot, never inherited by another job.
+export const OCTOBER_PROTOCOL_JOB_ID='65a3be4d-9fe8-4ded-82c9-7497260b90bf';
+// Each opt-in is bound to its authorized job and period. The monthly exception
+// must never be inherited by another October job or the January-September run.
 export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
   const strategy=m?.enrichmentStrategy??'client';
   if(strategy==='client') return false;
   if(strategy!=='protocol') return fail('ESTRATEGIA_ENRIQUECIMENTO_INVALIDA');
   const permission=m.protocolException;
+  if(m.phase==='october') {
+    if(m.year!==2026||jobId!==OCTOBER_PROTOCOL_JOB_ID||m.cutoff!=='2026-10-31'||m.osDateField!=='data_termino_executado'||m.autoPublish||
+        !Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>5000||permission?.enabled!==true||
+        permission.jobId!==jobId||permission.month!=='2026-10') return fail('EXCECAO_PROTOCOLO_FORA_DE_OUTUBRO');
+    return true;
+  }
   if(m.year!==2026||m.phase!=='day'||m.peakDay!=='2026-10-01'||!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>500||
       permission?.enabled!==true||permission.day!==m.peakDay||permission.jobId!==jobId||
       !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(permission.jobId??'')) return fail('EXCECAO_PROTOCOLO_FORA_DO_PILOTO');

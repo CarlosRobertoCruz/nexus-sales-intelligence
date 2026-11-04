@@ -1,10 +1,10 @@
 import { readFile,writeFile } from 'node:fs/promises';
 import { validateManifest,monthsFor,daysFor } from '../historyPolicy.mjs';
 const [action='help',argument,evidenceFile]=process.argv.slice(2);
-const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','export-review','reconcile','attach-reports','enable-pilot-protocol','rebuild-metrics'];
+const commands=['plan','create','status','start','pause','cancel','run','approve','export-ids','export-followup','export-review','reconcile','attach-reports','enable-pilot-protocol','enable-october-protocol','rebuild-metrics'];
 let pool;
 try {
-  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; export-review UUID diretorio-novo; attach-reports UUID referencias.json; enable-pilot-protocol UUID; rebuild-metrics'); }
+  if(action==='help') { console.log('Uso: node server/jobs/import-year.mjs plan|create manifesto.json; status|start|pause|cancel|run UUID; approve UUID evidencia.json; export-ids|export-followup|reconcile UUID arquivo.json; export-review UUID diretorio-novo; attach-reports UUID referencias.json; enable-pilot-protocol|enable-october-protocol UUID; rebuild-metrics'); }
   else if(!commands.includes(action)||(!argument&&action!=='rebuild-metrics')) throw new Error('COMANDO_INVALIDO');
   else if(action==='plan') {
     const manifest=validateManifest(JSON.parse(await readFile(argument,'utf8')));
@@ -27,14 +27,15 @@ try {
         throw error;
       } finally { db.release(); }
     } else {
-    const {createHistoryJob,historyStatus,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
+    const {createHistoryJob,historyStatus,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol,enableOctoberProtocol}=await import('../history.mjs');
     if(action==='create') console.log(JSON.stringify({id:await createHistoryJob(pool,JSON.parse(await readFile(argument,'utf8')))}));
     else {
       if(!/^[a-f\d-]{36}$/i.test(argument)) throw new Error('ID_CARGA_INVALIDO');
       if(action==='status') console.log(JSON.stringify(await historyStatus(pool,argument),null,2));
-      else if(action==='enable-pilot-protocol') {
+      else if(action==='enable-pilot-protocol'||action==='enable-october-protocol') {
         if(process.env.HUBSOFT_HISTORY_ENABLED!=='true'||process.env.HUBSOFT_HISTORY_IP_COORDINATED!=='true'||Number(process.env.HUBSOFT_REQUESTS_PER_SECOND??1)!==1) throw new Error('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
-        console.log(JSON.stringify(await enablePilotProtocol(pool,argument),null,2));
+        const enable=action==='enable-pilot-protocol'?enablePilotProtocol:enableOctoberProtocol;
+        console.log(JSON.stringify(await enable(pool,argument),null,2));
       }
       else if(action==='export-review') {
         if(!evidenceFile) throw new Error('DIRETORIO_DESTINO_OBRIGATORIO');

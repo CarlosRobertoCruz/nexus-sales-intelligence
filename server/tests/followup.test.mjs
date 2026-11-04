@@ -5,9 +5,9 @@ import {PGlite} from '@electric-sql/pglite';
 process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
 process.env.TZ='America/Sao_Paulo';
 const {pool}=await import('../db.mjs');
-const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol}=await import('../history.mjs');
+const {createHistoryJob,controlHistoryJob,historyStep,approveHistoryMonth,enablePilotProtocol,enableOctoberProtocol}=await import('../history.mjs');
 const {followupReport,orderDate,followupOrder,commercialFollowupKind}=await import('../historyFollowup.mjs');
-const {validateManifest}=await import('../historyPolicy.mjs');
+const {validateManifest,OCTOBER_PROTOCOL_JOB_ID}=await import('../historyPolicy.mjs');
 const {rebuild}=await import('../records.mjs');
 const {historyReconciliation,attachHistoryReports}=await import('../historyReconciliation.mjs');
 const {capturedDraftAttendanceIds,markCapturedDrafts}=await import('../historyDrafts.mjs');
@@ -218,6 +218,55 @@ test('piloto retoma a página já salva por protocolo com cache próprio, sem ap
   assert.deepEqual(records.map(r=>r.payload.usuario_abertura),['Beatriz','Carlos']);
   assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
   await assert.rejects(enablePilotProtocol(db,id),/ESTADO_NAO_PERMITE_EXCECAO/);
+}));
+
+test('outubro retoma o job autorizado sem repetir paginas nem apagar caches, com ritmo e orcamento obrigatorios',async()=>fixture(async db=>{
+  const id=OCTOBER_PROTOCOL_JOB_ID;
+  const m={...structuredClone(manifest),phase:'october',cutoff:'2026-10-31',followupCutoff:'2026-11-02',maxCalls:5000};
+  m.reports.followup={pending:true,filters:{dateField:'data_cadastro',otherFilters:'none',relationship:'id_atendimento',followupCutoff:m.followupCutoff}};
+  const raw={...attendance,protocolo:'202610010001',data_cadastro:'01/10/2026',usuario_abertura:null,ordem_servico_count:0};
+  const detail={...raw,usuario_abertura:'Beatriz',ordens_servico:[]};
+  const prior={...detail,id_atendimento:100,protocolo:'202610010000'};
+  await db.query("INSERT INTO history_jobs(id,phase,state,error_code,manifest) VALUES($1,'october','paused','HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO',$2::jsonb)",[id,JSON.stringify(m)]);
+  await db.query("INSERT INTO history_pages(job_id,day,stream,page,records,complete,processed) VALUES($1,'2026-10-01','attendance',0,$2::jsonb,false,true),($1,'2026-10-01','attendance',1,$3::jsonb,true,false)",[id,JSON.stringify([prior]),JSON.stringify([raw])]);
+  await db.query("INSERT INTO history_clients(job_id,client_code,day,records) VALUES($1,'12','2026-10-01','[]')",[id]);
+  const priorCache={record:prior,observedAt:'2026-11-03T20:00:00Z'};
+  await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[`hubsoft_history_protocol:${id}:100`,JSON.stringify(priorCache)]);
+  await db.query("INSERT INTO hubsoft_call_metrics(job_id,method,path,status,latency_ms) SELECT $1,'GET','/test',200,1 FROM generate_series(1,2)",[id]);
+  await assert.rejects(enableOctoberProtocol(db,'11111111-1111-4111-8111-111111111111'),/FORA_DE_OUTUBRO/);
+  await assert.rejects(enablePilotProtocol(db,id),/ESTADO_NAO_PERMITE_EXCECAO/);
+  await db.query("UPDATE history_jobs SET error_code='OUTRO_ERRO' WHERE id=$1",[id]);
+  await assert.rejects(enableOctoberProtocol(db,id),/ERRO_NAO_PERMITE_EXCECAO/);
+  await db.query("UPDATE history_jobs SET error_code='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO' WHERE id=$1",[id]);
+  const enabled=await enableOctoberProtocol(db,id);
+  assert.equal(enabled.state,'paused');assert.equal(enabled.enrichment_strategy,'protocol');assert.equal(enabled.calls.calls,2);
+  assert.equal(enabled.pages.pages,2);assert.equal(enabled.pages.processed,1);
+  assert.deepEqual((await db.query('SELECT records FROM history_clients WHERE job_id=$1',[id])).rows[0].records,[]);
+  assert.deepEqual((await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_protocol:${id}:100`])).rows[0].value,priorCache);
+  assert.equal((await db.query('SELECT manifest FROM history_jobs WHERE id=$1',[id])).rows[0].manifest.maxCalls,5000);
+  let details=0,listed=0;
+  const client={gate:{interval:500},page:async(stream,day)=>{listed++;assert.ok(day>='2026-10-01'&&day<='2026-10-31');assert.notEqual(`${day}:${stream}`,'2026-10-01:attendance');return {records:[],complete:true};},
+    clientAttendances:async()=>{assert.fail('nao deve repetir a consulta por cliente');},
+    attendanceDetail:async protocol=>{details++;assert.equal(protocol,raw.protocolo);return detail;}};
+  await controlHistoryJob(db,id,'start');
+  await assert.rejects(enableOctoberProtocol(db,id),/ESTADO_NAO_PERMITE_EXCECAO/);
+  let status=await historyStep(db,client,id);
+  assert.equal(status.error_code,'PILOTO_PROTOCOLO_EXIGE_1_REQ_S');assert.equal(details+listed,0);
+  client.gate.interval=1000;
+  await controlHistoryJob(db,id,'start');await db.query('UPDATE history_jobs SET next_at=now() WHERE id=$1',[id]);
+  for(let i=0;i<200;i++){status=await historyStep(db,client,id);if(status.state!=='running')break;}
+  assert.equal(status.state,'awaiting_validation',JSON.stringify(status));assert.equal(details,1);
+  assert.equal(status.totals.find(row=>row.kind==='attendance').unique_records,1);
+  assert.deepEqual((await db.query("SELECT records FROM history_pages WHERE job_id=$1 AND stream='attendance' AND day='2026-10-01' AND page=0",[id])).rows[0].records,[prior]);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  const proof={...evidence,attendance:{reportSha256:m.reports.attendance.fileSha256,ids:['999']},serviceOrders:{reportSha256:m.reports.serviceOrders.fileSha256,ids:[]}};
+  await assert.rejects(approveHistoryMonth(db,id,proof),/RECONCILIACAO_DIVERGENTE/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM source_records')).rows[0].n,0);
+  await db.query("INSERT INTO hubsoft_call_metrics(job_id,method,path,status,latency_ms) SELECT $1,'GET','/test',200,1 FROM generate_series(1,4998)",[id]);
+  await db.query("UPDATE history_jobs SET state='paused',next_at=now() WHERE id=$1",[id]);
+  await controlHistoryJob(db,id,'start');
+  status=await historyStep(db,client,id);
+  assert.equal(status.error_code,'ORCAMENTO_ATINGIDO');assert.equal(status.calls.calls,5000);assert.equal(details,1);
 }));
 
 test('piloto por protocolo rejeita identidade, cliente, data e campos inválidos antes de armazenar cache',async()=>fixture(async db=>{

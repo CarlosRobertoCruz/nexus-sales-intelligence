@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {HubsoftClient} from '../hubsoft.mjs';
-import {usesProtocolPilot} from '../historyPolicy.mjs';
+import {usesProtocolPilot,OCTOBER_PROTOCOL_JOB_ID} from '../historyPolicy.mjs';
 
 const env={HUBSOFT_API_URL:'https://example.invalid',HUBSOFT_CLIENT_ID:'c',HUBSOFT_CLIENT_SECRET:'s',HUBSOFT_USERNAME:'u',HUBSOFT_PASSWORD:'p'};
 const record={id_atendimento:110,protocolo:'202610010001',usuario_abertura:'Teste',ordens_servico:[]};
@@ -47,4 +47,19 @@ test('exceção fica vinculada a um job e não se propaga para outro dia, mês o
     assert.throws(()=>usesProtocolPilot({...m,...change},id),/EXCECAO/);
   }
   assert.throws(()=>usesProtocolPilot(m,'22222222-2222-4222-8222-222222222222'),/EXCECAO/);
+});
+
+test('excecao mensal exige o job autorizado, outubro por conclusao e teto de 5000 chamadas',()=>{
+  const id=OCTOBER_PROTOCOL_JOB_ID;
+  const m={year:2026,phase:'october',cutoff:'2026-10-31',osDateField:'data_termino_executado',maxCalls:5000,
+    enrichmentStrategy:'protocol',protocolException:{enabled:true,jobId:id,month:'2026-10'}};
+  assert.equal(usesProtocolPilot(m,id),true);
+  for(const change of [{phase:'history'},{phase:'day'},{year:2025},{cutoff:'2026-11-01'},
+    {osDateField:'data_cadastro'},{autoPublish:true},{maxCalls:5001},{maxCalls:0},{maxCalls:1.5},
+    {protocolException:{...m.protocolException,enabled:false}},
+    {protocolException:{...m.protocolException,month:'2026-09'}},
+    {protocolException:{...m.protocolException,jobId:'11111111-1111-4111-8111-111111111111'}}]) {
+    assert.throws(()=>usesProtocolPilot({...m,...change},id),/EXCECAO/);
+  }
+  assert.throws(()=>usesProtocolPilot(m,'11111111-1111-4111-8111-111111111111'),/EXCECAO/);
 });

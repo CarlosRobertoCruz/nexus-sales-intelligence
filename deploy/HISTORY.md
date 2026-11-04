@@ -188,7 +188,7 @@ dc run --rm --no-deps -v /caminho/restrito:/arquivo:ro history approve UUID /arq
 
 Se os conjuntos de IDs divergirem, não há publicação. Se coincidirem, gravação dos registros e reconstrução dos indicadores ocorrem na mesma transação. A publicação não apaga os outros meses. O limite de 50 mil registros permanece. Antes de qualquer publicação, manter backup do schema do Sales e ensaio de restauração isolada; não restaurar o banco `lab` inteiro.
 
-O piloto B (`phase=october`) exige `approvedDayJob`, com o piloto A concluído e aprovado, e outubro fechado. Até 31/10, o comando recusa chamá-lo de mês integral. Se forem parciais, os totais 1.267/566 precisam ser comparados no corte correspondente, sem apresentá-los como fechamento. O piloto mensal usa os relatórios efetivamente exportados, não números forçados. A referência de acompanhamento pode iniciar como `pending` somente para permitir a coleta; `autoPublish` continua recusado e a aprovação só é possível depois de anexar uma conferência independente dos vínculos.
+O piloto B (`phase=october`) exige `approvedDayJob`, com o piloto A concluído e aprovado, e outubro fechado. Até 31/10, o comando recusa chamá-lo de mês integral. Se forem parciais, os totais 1.267/566 precisam ser comparados no corte correspondente, sem apresentá-los como fechamento. O piloto mensal usa os relatórios efetivamente exportados, não números forçados. A referência de acompanhamento pode iniciar como `pending`, com vínculos observacionais conforme a regra comercial abaixo; `autoPublish` continua recusado nesta fase e a publicação exige aprovação explícita e reconciliação dos relatórios de atendimentos e OS de produção.
 
 A fase C (`phase=history`) exige `approvedOctoberJob` concluído/aprovado, corte pelo menos 31/10 e `monthReports` com referências de janeiro a setembro. Após cada aprovação, há espera persistida de cinco minutos; janeiro respeita também o próximo horário do piloto de outubro. Por padrão, cada mês pede evidência. Para continuar automaticamente, o manifesto pode usar `autoPublish=true`, `reviewer` e as listas `ids` já conferidas em cada `monthReports[MES][ENTIDADE]`; a igualdade dos conjuntos continua obrigatória. Divergência pausa a publicação.
 
@@ -235,3 +235,41 @@ Atendimentos marcados pela Hubsoft como `rascunho=Sim`, sem descrição, sem tip
 O seletor de período do painel consulta somente a base publicada. A consulta manual por dia é opcional e fica em `publication_scope=manual_staging`: seus registros são preservados para diagnóstico, mas não podem mudar vendas, renovações, cancelamentos ou reativações sem uma publicação reconciliada. Uma consulta manual também não sobrescreve um registro já publicado com ID Hubsoft canônico.
 
 Ao atualizar esta regra, executar `dc run --rm --no-deps history rebuild-metrics`. O comando marca apenas os registros legados sem ID canônico como `manual_staging`, recalcula `commercial_records` dentro de uma transação e imprime as contagens resultantes. Não chama a Hubsoft, não remove registros brutos e não cria duplicidade.
+
+## Retomada de outubro por protocolo (autorização de 03/11/2026)
+
+Autorização restrita ao job `65a3be4d-9fe8-4ded-82c9-7497260b90bf`, fase `october`, corte `2026-10-31`, OS por `data_termino_executado`, 1 requisição por segundo e teto acumulado de 5.000 chamadas. O teto inclui OAuth e as chamadas já registradas antes da pausa. A consulta exata por protocolo usa `limit=1`; valida ID de atendimento, protocolo, cliente e dia antes de gravar o cache. As páginas e os caches anteriores são preservados. Outros jobs e janeiro-setembro continuam usando a estratégia por cliente.
+
+O comando `enable-october-protocol` registra a autorização no manifesto salvo do mesmo job. Exige estado pausado por `HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO` na primeira ativação; uma reativação do mesmo modo pode ser repetida enquanto o job estiver pausado. Não cria job nem inicia coleta. Não reenviar o manifesto local, não apagar páginas e não repetir `create`.
+
+Após merge e deploy da API, executar no terminal da VPS:
+
+```bash
+cd /home/lab/projetos/nexus-sales-intelligence
+dc() { docker compose --env-file .env.vps -f compose.vps.yml "$@"; }
+
+monthly() {
+  dc run --rm --no-deps \
+    -e HUBSOFT_HISTORY_ENABLED=true \
+    -e HUBSOFT_HISTORY_IP_COORDINATED=true \
+    -e HUBSOFT_REQUESTS_PER_SECOND=1 \
+    history "$@"
+}
+
+monthly enable-october-protocol 65a3be4d-9fe8-4ded-82c9-7497260b90bf
+# Conferir enrichment_strategy=protocol e state=paused antes de continuar.
+monthly start 65a3be4d-9fe8-4ded-82c9-7497260b90bf
+
+# Executar uma única vez. Usa um nome novo para preservar os logs do worker anterior.
+dc run --detach --no-deps \
+  --name lab-nexus-sales-history-october-2026-protocol \
+  -e HUBSOFT_HISTORY_ENABLED=true \
+  -e HUBSOFT_HISTORY_IP_COORDINATED=true \
+  -e HUBSOFT_REQUESTS_PER_SECOND=1 \
+  history run 65a3be4d-9fe8-4ded-82c9-7497260b90bf
+
+monthly status 65a3be4d-9fe8-4ded-82c9-7497260b90bf
+docker logs --tail 5 lab-nexus-sales-history-october-2026-protocol
+```
+
+O worker termina ao pausar ou chegar a `awaiting_validation`. Ao terminar a coleta, executar `monthly reconcile 65a3be4d-9fe8-4ded-82c9-7497260b90bf` e conferir os conjuntos de chaves dos relatórios mensais antes de aprovar. O padrão por cliente não vira fallback automático: esta exceção só é ativada pelo comando acima no job autorizado. O aviso de contêiner órfão pode aparecer com workers nomeados; não executar `--remove-orphans` durante a carga.
