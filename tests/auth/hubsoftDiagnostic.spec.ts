@@ -10,45 +10,31 @@ test("diagnostic formatter ignores arbitrary values and unknown fields", () => {
   expect(hubsoftDiagnosticMessage(null)).toBe("");
 });
 
-test("sync panel displays safe missing-field diagnostic without extra queries", async ({ page }, info) => {
+test("dashboard keeps manual imports hidden and never queries Hubsoft on navigation", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await page.emulateMedia({ reducedMotion: "reduce" });
-  let syncCalls = 0;
+  const hubsoftCalls: string[] = [];
   const ledger = { version: 1, attendance: [], serviceOrders: [], sales: [], renewals: [], cancellations: [], reactivations: [] };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/session") return route.fulfill({ json: { user: { name: "Teste", email: "test@example.invalid" } } });
     if (path === "/api/data") return route.fulfill({ json: { ledger } });
-    if (path === "/api/hubsoft/status") return route.fulfill({ json: { configured: true, runs: [] } });
-    if (path === "/api/hubsoft/sync") {
-      syncCalls++;
-      expect(route.request().postDataJSON()).toEqual({ day: "2026-10-10", restart: false });
-      return route.fulfill({ status: 400, json: {
-        error: "HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES",
-        diagnostic: { kind: "attendance", missingFields: ["usuario_abertura"], invalidFields: [] },
-      } });
+    if (path.startsWith("/api/hubsoft/")) {
+      hubsoftCalls.push(path);
+      return route.fulfill({ json: { configured: true, runs: [] } });
     }
     throw new Error("Unexpected request: " + path);
   });
   await page.goto("/");
-  const panel = page.getByRole("region", { name: "Importação Hubsoft" });
-  await page.getByLabel("Dia da consulta").fill("2026-10-10");
-  await page.getByRole("button", { name: "Consultar / continuar" }).click();
-  await expect(panel.getByRole("status")).toContainText("Campos ausentes ou vazios: usuario_abertura.");
-  await expect(panel.getByRole("status")).toContainText("ponto de retomada foi preservado");
-  await expect(page.getByRole("button", { name: "Consultar / continuar" })).toBeEnabled();
-  expect(syncCalls).toBe(1);
-  // Mensagem longa + menu completo: a lateral deve permitir chegar ao fim.
-  const sidebar = page.locator(".app-sidebar");
-  await page.evaluate(() => window.scrollTo(0, 300));
-  await sidebar.hover({ position: { x: 100, y: 250 } });
-  await page.mouse.wheel(0, 2500);
-  await expect.poll(() => sidebar.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
-  const imports = page.getByRole("button", { name: "Importar planilhas" });
-  await expect(imports).toBeInViewport();
-  const feedback = panel.getByRole("status");
-  await expect(feedback).toBeInViewport();
-  await expect.poll(() => imports.evaluate((el) => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(720);
-  await page.screenshot({ path: info.outputPath("sidebar-diagnostic-scroll.png") });
-
+  await expect(page.getByText("Visão geral de vendas", { exact: true })).toBeVisible();
+  const navigation = page.getByRole("navigation", { name: "Navegação principal" });
+  for (const name of ["Vendas", "Renovações", "Cancelamentos", "Visão geral"]) {
+    await navigation.getByRole("button", { name, exact: true }).click();
+    await expect(navigation.getByRole("button", { name, exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("region", { name: "Importação Hubsoft" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Consultar / continuar" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Importar planilhas" })).toHaveCount(0);
+    await expect(page.locator("input[type=date]")).toHaveCount(0);
+  }
+  expect(hubsoftCalls).toEqual([]);
 });

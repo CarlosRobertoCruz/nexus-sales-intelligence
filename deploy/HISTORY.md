@@ -273,3 +273,56 @@ docker logs --tail 5 lab-nexus-sales-history-october-2026-protocol
 ```
 
 O worker termina ao pausar ou chegar a `awaiting_validation`. Ao terminar a coleta, executar `monthly reconcile 65a3be4d-9fe8-4ded-82c9-7497260b90bf` e conferir os conjuntos de chaves dos relatórios mensais antes de aprovar. O padrão por cliente não vira fallback automático: esta exceção só é ativada pelo comando acima no job autorizado. O aviso de contêiner órfão pode aparecer com workers nomeados; não executar `--remove-orphans` durante a carga.
+
+## Conferência das OS técnicas de outubro (05/11/2026)
+
+O arquivo local `tmp/hubsoft-october-2026-r1/reconciliation-october.json`, exportado em 04/11, registra 1.575 atendimentos correspondentes ao relatório e 389 OS coletadas para 602 números no relatório de conclusões. O cruzamento pelo número com o XLSX original, cujo SHA-256 foi validado, explica as 213 diferenças: 192 checklists, 13 `(SFN) SUPORTE`, 7 `MANUTENÇÃO` e 1 `ABERTURA DE CTO`. Nenhuma dessas diferenças tem tipo de instalação, retirada/cancelamento ou reativação. Ausência de código de cliente não é usada para inferir destino interno.
+
+O preparador offline `scripts/review-hubsoft-os-scope.py` mantém todas as chaves originais. Checklists usam a exclusão existente. As outras três categorias exigem `reportTypeExclusions`, com hash do relatório e, para cada OS, número, tipo exato e dia de conclusão dentro do intervalo exportado. Somente os três tipos acima são aceitos nessa revisão. Tipos comerciais, datas incompatíveis, chaves desconhecidas, duplicadas ou sobrepostas e hash divergente são recusados. Se uma OS coletada contradizer o tipo declarado na revisão, a conferência também é recusada.
+
+O script não acessa API/banco, não cria aprovação e não sobrescreve arquivo existente. A nova referência já foi preparada localmente em `tmp/hubsoft-october-2026-r1/references-scope-reviewed.json`. Para reproduzir em outro diretório de saída, usando um Python com `openpyxl`:
+
+```powershell
+python -B scripts/review-hubsoft-os-scope.py --references tmp/hubsoft-october-2026-r1/references.json --orders "C:\Users\supor\Downloads\e82f0e74-3892-4bb6-a9ed-5b0ef7dfaf64.zip" --output tmp/hubsoft-october-2026-r1/references-scope-reviewed.json
+```
+
+Depois de commit, push, merge e deploy **da API** com essas alterações (sem migração de banco e sem alteração de web), enviar a referência no **PowerShell local**, na pasta do Sales:
+
+```powershell
+scp ".\tmp\hubsoft-october-2026-r1\references-scope-reviewed.json" "vps-lab:/home/lab/pilotos/sales-2026-10/"
+```
+
+No **terminal da VPS**, anexar ao mesmo job. O comando altera somente as referências salvas, sem refazer coleta, iniciar worker, apagar cache ou publicar indicadores. A saída vai para arquivo para não exceder o histórico do terminal:
+
+```bash
+cd /home/lab/projetos/nexus-sales-intelligence
+dc() { docker compose --env-file .env.vps -f compose.vps.yml "$@"; }
+chmod 600 /home/lab/pilotos/sales-2026-10/references-scope-reviewed.json
+umask 077
+dc run --rm --no-deps -T \
+  --user "$(id -u):$(id -g)" \
+  -v /home/lab/pilotos/sales-2026-10:/entrada:ro,Z \
+  history attach-reports 65a3be4d-9fe8-4ded-82c9-7497260b90bf \
+  /entrada/references-scope-reviewed.json \
+  > /home/lab/pilotos/sales-2026-10/reconciliation-scope-reviewed.json
+```
+
+Somente após o comando terminar com sucesso, mostrar um resumo sem listas longas:
+
+```bash
+dc run --rm --no-deps -T \
+  --user "$(id -u):$(id -g)" \
+  -v /home/lab/pilotos/sales-2026-10:/entrada:ro,Z \
+  --entrypoint node history --input-type=module -e '
+import {readFileSync} from "node:fs";
+const r=JSON.parse(readFileSync("/entrada/reconciliation-scope-reviewed.json","utf8"));
+const a=r.reports.attendance,o=r.reports.serviceOrders;
+console.log(JSON.stringify({state:r.state,publishable:r.publishable,quality:r.quality,
+  attendance:{status:a.status,expected:a.expected,actual:a.actual},
+  serviceOrders:{status:o.status,rawStatus:o.rawStatus,expected:o.expected,actual:o.actual,
+    rawMissing:o.missing.length,extra:o.extra.length,ambiguous:o.ambiguous.length,
+    scopeExpected:o.commercialScope?.expected,scopeActual:o.commercialScope?.actual,
+    scopeMissing:o.commercialScope?.missing.length}},null,2));'
+```
+
+Com base no snapshot local, o resultado esperado é `attendance.status=matched`, `serviceOrders.status=matched`, `rawStatus=divergent`, 602 referências brutas, 389 coletadas e 389/389 no conjunto comparável. O resultado real da VPS ainda precisa ser conferido. Qualquer diferença comercial restante bloqueia a publicação. A comparação bruta, as exclusões e o hash permanecem auditáveis no manifesto e, após aprovação explícita, em `history_months.reconciliation.reportScopes`. Anexar referências não aprova o mês: não executar `start`, `run` ou `create`; a aprovação continua sendo uma etapa separada.
