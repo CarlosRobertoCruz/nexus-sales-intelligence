@@ -110,12 +110,18 @@ export async function upsertRows(db, kind, records, source) {
  ON CONFLICT(kind,id) DO UPDATE SET
    payload=CASE
      WHEN excluded.payload->>'publication_scope'='manual_staging'
+       AND COALESCE(source_records.payload->>'publication_scope','published') IN ('published','installation_context')
+     THEN source_records.payload
+     WHEN excluded.payload->>'publication_scope'='installation_context'
        AND COALESCE(source_records.payload->>'publication_scope','published')='published'
      THEN source_records.payload
      ELSE excluded.payload
    END,
    source=CASE
      WHEN excluded.payload->>'publication_scope'='manual_staging'
+       AND COALESCE(source_records.payload->>'publication_scope','published') IN ('published','installation_context')
+     THEN source_records.source
+     WHEN excluded.payload->>'publication_scope'='installation_context'
        AND COALESCE(source_records.payload->>'publication_scope','published')='published'
      THEN source_records.source
      ELSE excluded.source
@@ -182,7 +188,7 @@ export async function rebuild(db) {
   ).rows;
   const a = raw.filter((r) => r.kind === "attendance").map((r) => r.payload),
     o = raw.filter((r) => r.kind === "serviceOrders").map((r) => r.payload);
-  if (!a.length || !o.length) {
+  if (!a.some(row=>row.publication_scope!=='installation_context') || !o.length) {
     // Never keep stale metrics after the upstream deletes the final source records.
     const previous = Number(
       (await db.query("SELECT count(*) AS count FROM commercial_records"))

@@ -116,3 +116,30 @@ test('instalação posterior mantém a data de execução e os demais tipos não
     {...orderFixture,id_ordem_servico:'203',numero_ordem_servico:'127',tipo_ordem_servico:'Reativação'}]));
   assert.equal(result.sales.length,1);assert.equal(result.sales[0].date.getDate(),5);assert.equal(result.reactivations.length,1);
 });
+
+test('atendimento anterior serve só de contexto da OS validada, sem criar mês ou indicadores anteriores',()=>{
+  const october={...attendanceFixture,tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:'Renovação com benefício'};
+  const september={...attendanceFixture,id_atendimento:'99',protocolo:'202609300001',data_cadastro:'30/09/2026',
+    publication_scope:'installation_context',installation_context_order_ids:'201'};
+  const order={...orderFixture,id_atendimento:'99'};
+  const result=classifyCommercialRows(worksheet([october,september]),worksheet([order]));
+  assert.equal(result.sales.length,1);assert.equal(result.sales[0].attendanceId,'hubsoft:99');
+  assert.equal(result.sales[0].date.getMonth(),9);
+  assert.equal(result.attendance.length,1);assert.equal(result.attendanceRows,1);
+  assert.equal(result.renewals.length,1);assert.equal(result.periodKey,'2026-10');
+  assert.equal(result.periodStart.getMonth(),9,'contexto não introduz setembro no período');
+  for(const changes of [
+    {publication_scope:'installation_context',installation_context_order_ids:'999'},
+    {codigo_cliente:'999'},
+    {classification_status:'incomplete'},
+    {tipo_atendimento:'SUPORTE'},
+    {data_cadastro:'02/10/2026'},
+    {id_atendimento:'98'},
+  ]) {
+    const rejected=classifyCommercialRows(worksheet([october,{...september,...changes}]),worksheet([order]));
+    assert.equal(rejected.sales.length,0,JSON.stringify(changes));
+    assert.equal(rejected.attendanceRows,1);
+  }
+  const anotherOrder={...order,id_ordem_servico:'202',numero_ordem_servico:'126'};
+  assert.equal(classifyCommercialRows(worksheet([october,september]),worksheet([order,anotherOrder])).sales.length,1,'contexto não autoriza outra OS do mesmo pai');
+});
