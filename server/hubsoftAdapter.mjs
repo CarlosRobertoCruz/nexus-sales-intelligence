@@ -23,6 +23,13 @@ function diagnosticDate(kind, field, value) {
   try { return apiDate(value); }
   catch { throw new HubsoftMappingError("HUBSOFT_DATA_NAO_RECONHECIDA", kind, [], [field]); }
 }
+export function parseOrderCustomerDisplay(value) {
+  if (typeof value !== 'string') return null;
+  // A displayed customer code must be separated from the name. Never extract
+  // arbitrary digits from a name, nor accept an unbounded/rounded identifier.
+  const match = /^\s*(?:\((\d{1,40})\)\s*(?:[-–|:]\s*)?|(\d{1,40})(?:\s*[-–|:]\s*|\s+))(\S(?:.*\S)?)\s*$/u.exec(value);
+  return match ? {code:match[1]??match[2],name:match[3]} : null;
+}
 export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled = true, allowIncompleteBusinessFields = false } = {}) {
   let clientCode = pick(
     row,
@@ -39,10 +46,12 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
   );
   // The OS list documents cliente as a display string, unlike attendance's nested client.
   if (kind === "serviceOrders" && typeof row.cliente === "string") {
-    const display = row.cliente.match(/^(\d+)\s*-\s*(.+)$/);
+    const display = parseOrderCustomerDisplay(row.cliente);
     if (display) {
-      clientCode ||= display[1];
-      customer = display[2];
+      if (clientCode && clientCode !== display.code)
+        throw new HubsoftMappingError('HUBSOFT_OS_CLIENTE_DIVERGENTE',kind,[],['codigo_cliente']);
+      clientCode ||= display.code;
+      customer = display.name;
     }
   }
   const location = {

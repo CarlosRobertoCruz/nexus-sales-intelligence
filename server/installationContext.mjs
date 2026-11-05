@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {exactId,localDay,OCTOBER_PROTOCOL_JOB_ID} from './historyPolicy.mjs';
-import {normalizeHubsoft} from './hubsoftAdapter.mjs';
+import {normalizeHubsoft,parseOrderCustomerDisplay} from './hubsoftAdapter.mjs';
 import {rebuild,upsertRows} from './records.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -41,6 +41,29 @@ async function withLock(pool,work) {
   } finally {try {if(locked)await db.query('SELECT pg_advisory_unlock(73190602)');} finally {db.release();}}
 }
 
+async function recoverOrderClient(db,scope,target) {
+  const snapshots=(await db.query(`SELECT r.item FROM history_pages p
+    CROSS JOIN LATERAL jsonb_array_elements(p.records) AS r(item)
+    WHERE p.job_id=$1 AND p.processed
+      AND p.stream IN ('serviceOrders','serviceOrderCompletions')
+      AND r.item->>'id_ordem_servico'=$2`,[scope.jobId,target.orderId])).rows;
+  if(!snapshots.length) return fail('CONTEXTO_CLIENTE_SEM_EVIDENCIA');
+  const codes=new Set();
+  for(const {item} of snapshots) {
+    if(item.deleted_at||exactId(item.id_ordem_servico)!==target.orderId||
+      exactId(item.numero_ordem_servico??item.numero)!==target.orderNumber||
+      exactId(item.id_atendimento??item.atendimento?.id_atendimento)!==target.attendanceId||
+      (item.atendimento?.protocolo!=null&&exactId(item.atendimento.protocolo)!==target.protocol))
+      return fail('CONTEXTO_SNAPSHOT_DIVERGENTE');
+    const candidates=[item.codigo_cliente,item.cliente?.codigo_cliente,item.cliente_servico?.cliente?.codigo_cliente,
+      parseOrderCustomerDisplay(item.cliente)?.code].filter(value=>value!==undefined&&value!==null&&value!=='');
+    if(!candidates.length) return fail('CONTEXTO_CLIENTE_SEM_EVIDENCIA');
+    for(const code of candidates) codes.add(exactId(code));
+  }
+  if(codes.size!==1) return fail('CONTEXTO_CLIENTE_DIVERGENTE');
+  return [...codes][0];
+}
+
 async function loadOrders(db,scope) {
   const job=(await db.query(`SELECT j.phase,j.state,j.approved,j.manifest,m.state AS month_state
     FROM history_jobs j JOIN history_months m ON m.job_id=j.id AND m.month=$2 WHERE j.id=$1`,[scope.jobId,scope.month])).rows[0];
@@ -54,14 +77,16 @@ async function loadOrders(db,scope) {
       AND COALESCE(s.payload->>'publication_scope','published')='published'`,
     [scope.jobId,target.orderId,scope.month,`hubsoft:${target.orderId}`])).rows;
     if(saved.length!==1) return fail('OS_PUBLICADA_NAO_ENCONTRADA');
-    const order=saved[0].payload;
+    let order=saved[0].payload;
     if(exactId(order.id_ordem_servico)!==target.orderId||exactId(order.numero_ordem_servico)!==target.orderNumber||
       exactId(order.id_atendimento)!==target.attendanceId||norm(order.tipo_ordem_servico)!=='instalacao'||
       norm(order.status)!=='finalizado') return fail('CONTEXTO_OS_DIVERGENTE');
+    const recoveredClient=order.codigo_cliente===undefined||order.codigo_cliente===null||order.codigo_cliente==='';
+    if(recoveredClient) order={...order,codigo_cliente:await recoverOrderClient(db,scope,target)};
     exactId(order.codigo_cliente);
     const start=executionStamp(order.data_inicio_executado),end=executionStamp(order.data_termino_executado);
     if(start>end||end.slice(0,7)!==scope.month) return fail('CONTEXTO_EXECUCAO_INVALIDA');
-    result.push({target,order,fingerprint:signature(order)});
+    result.push({target,order,recoveredClient,fingerprint:signature(order)});
   }
   return result;
 }
@@ -85,7 +110,7 @@ function validCache(value,scope,entry) {
 }
 function summary(scope,entries) {
   return {jobId:scope.jobId,month:scope.month,openingMonth:scope.openingMonth,maximumDetailQueries:entries.length,
-    targets:entries.map(({target:{orderId,orderNumber,attendanceId,protocol}})=>({orderId,orderNumber,attendanceId,protocol})),published:false};
+    targets:entries.map(({target:{orderId,orderNumber,attendanceId,protocol},recoveredClient})=>({orderId,orderNumber,attendanceId,protocol,clientRecoveredFromSnapshot:recoveredClient})),published:false};
 }
 
 export async function planInstallationContext(pool,input) {
@@ -125,6 +150,13 @@ export async function applyInstallationContext(pool,input,env=process.env) {
       for(const entry of entries) {
         const cache=(await db.query('SELECT value FROM application_settings WHERE key=$1',[key(scope,entry.target)])).rows[0]?.value;
         const record=validCache(cache,scope,entry);
+        if(entry.recoveredClient) {
+          const updated=await db.query(`UPDATE source_records SET
+            payload=jsonb_set(payload,'{codigo_cliente}',to_jsonb($2::text)),updated_at=now()
+            WHERE kind='serviceOrders' AND id=$1 AND COALESCE(payload->>'codigo_cliente','')=''
+            RETURNING id`,[`hubsoft:${entry.target.orderId}`,entry.order.codigo_cliente]);
+          if(updated.rows.length!==1) return fail('CONTEXTO_OS_DIVERGENTE');
+        }
         const existing=(await db.query("SELECT payload FROM source_records WHERE kind='attendance' AND id=$1",[`hubsoft:${entry.target.attendanceId}`])).rows[0]?.payload;
         if(existing&&!["manual_staging","installation_context"].includes(existing.publication_scope??'published')) {
           validateAttendance(existing,scope,entry);continue;

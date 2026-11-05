@@ -2,7 +2,7 @@ import { HubsoftError } from "./hubsoft.mjs";
 
 const FIELDS = {
   attendance: ["protocolo", "nome_razaosocial", "descricao_abertura", "usuario_abertura", "tipo_atendimento", "data_cadastro"],
-  serviceOrders: ["numero_ordem_servico", "nome_razaosocial", "tipo_ordem_servico", "status", "data_inicio_programado", "data_inicio_executado", "data_termino_executado"],
+  serviceOrders: ["numero_ordem_servico", "codigo_cliente", "nome_razaosocial", "tipo_ordem_servico", "status", "data_inicio_programado", "data_inicio_executado", "data_termino_executado"],
 };
 
 export class HubsoftMappingError extends HubsoftError {
