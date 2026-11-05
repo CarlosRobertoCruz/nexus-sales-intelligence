@@ -326,3 +326,13 @@ console.log(JSON.stringify({state:r.state,publishable:r.publishable,quality:r.qu
 ```
 
 Com base no snapshot local, o resultado esperado é `attendance.status=matched`, `serviceOrders.status=matched`, `rawStatus=divergent`, 602 referências brutas, 389 coletadas e 389/389 no conjunto comparável. O resultado real da VPS ainda precisa ser conferido. Qualquer diferença comercial restante bloqueia a publicação. A comparação bruta, as exclusões e o hash permanecem auditáveis no manifesto e, após aprovação explícita, em `history_months.reconciliation.reportScopes`. Anexar referências não aprova o mês: não executar `start`, `run` ou `create`; a aprovação continua sendo uma etapa separada.
+
+## Renovações e alterações de plano (05/11/2026)
+
+A gestão confirmou que o indicador de renovações deve incluir atendimentos com tipo exato `RENOVAÇÃO DE CONTRATO` ou `ALTERAÇÃO DE PLANO`, com normalização de acentos, caixa e espaços nas extremidades. Somente atendimentos com status `Resolvido` entram; `Finalizado` é aceito por compatibilidade com as planilhas legadas. Pendentes, em andamento, status ausente, menções em descrições, atendimento de suporte e tipos com sufixo `NÃO REALIZADO` não entram. A contagem continua por data de cadastro do atendimento, sem exigir OS, preservando a deduplicação por evento e as exclusões de registros incompletos/rascunhos abandonados. OS de troca de equipamento não criam renovação por si mesmas.
+
+O total de 180 para outubro foi informado pela gestão e ainda precisa ser confrontado com os tipos publicados e a deduplicação. O XLSX original de atendimentos não contém a coluna `tipo_atendimento`, portanto não comprova sozinho essa divisão. Não inserir ajuste numérico nem alterar dados brutos para alcançar 180.
+
+A consulta agregada fornecida pelo usuário retornou 172 renovações resolvidas, 12 alterações de plano resolvidas e 1 alteração de plano pendente. Conforme confirmação do usuário, a pendente não conta. São 184 protocolos resolvidos antes da deduplicação por evento; o total final de 180 ainda não foi confirmado. Os 48 atendimentos de renovação não realizada e 1 alteração de plano não realizada ficam excluídos.
+
+Depois do merge e deploy, reconstruir **API e web**, pois a classificação é compartilhada. Não exige migração, nova carga ou alteração das referências aprovadas. Para reaplicar a regra aos dados já publicados, executar na VPS `dc run --rm --no-deps history rebuild-metrics` e depois atualizar o navegador. O comando recalcula indicadores locais em transação, preserva os dados de origem e não consulta a Hubsoft. Conferir o resultado e investigar diferenças remanescentes, inclusive consolidação de eventos duplicados, antes de afirmar que a contagem final é 180.

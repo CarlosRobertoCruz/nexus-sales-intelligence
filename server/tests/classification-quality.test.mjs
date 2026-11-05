@@ -24,13 +24,45 @@ test('rascunho abandonado fica na origem, mas nao no volume de atendimentos nem 
   assert.equal(result.sales.length,1);assert.ok(result.warnings.some(w=>w.includes('1 rascunho(s) abandonado(s)')));
 });
 
-test('renovações seguem somente o tipo de atendimento usado no relatório oficial',()=>{
+test('renovações aceitam os dois tipos confirmados pela gestão, sem usar menções no texto',()=>{
   const renewal={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:'Cliente aceitou bônus de velocidade'};
+  const planChange={...attendanceFixture,id_atendimento:'105',protocolo:'202610010005',tipo_atendimento:'ALTERAÇÃO DE PLANO',descricao_abertura:'Cliente alterou o plano para 900 Mega Power Plus',data_cadastro:'15/10/2026'};
   const unrelated={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'SUPORTE',descricao_abertura:'Cliente perguntou sobre renovação e bônus'};
   const unsuccessful={...attendanceFixture,id_atendimento:'104',protocolo:'202610010004',tipo_atendimento:'RENOVAÇÃO DE CONTRATO NÃO REALIZADO',descricao_abertura:'Cliente não aceitou a oferta'};
-  const result=classifyCommercialRows(worksheet([renewal,unrelated,unsuccessful]),worksheet([orderFixture]));
+  const unsuccessfulChange={...planChange,id_atendimento:'106',protocolo:'202610010006',tipo_atendimento:'ALTERAÇÃO DE PLANO NÃO REALIZADO'};
+  const incompleteChange={...planChange,id_atendimento:'107',protocolo:'202610010007',classification_status:'incomplete'};
+  const draftChange={...planChange,id_atendimento:'108',protocolo:'202610010008',classification_status:'discarded_draft'};
+  const result=classifyCommercialRows(worksheet([renewal,planChange,unrelated,unsuccessful,unsuccessfulChange,incompleteChange,draftChange]),worksheet([orderFixture]));
+  assert.deepEqual(result.renewals.map(r=>r.id),[renewal.protocolo,planChange.protocolo]);
+  assert.equal(result.renewals[1].date.getDate(),15,'mês e dia seguem cadastro do atendimento');
+  assert.equal(result.sales.length,0,'alteração de plano não se transforma em instalação');
+});
+
+test('alteração de plano usa o mesmo tratamento de acentos e deduplicação das renovações',()=>{
+  const changed={...attendanceFixture,id_atendimento:'105',protocolo:'202610010005',tipo_atendimento:'  alteracao de plano  ',descricao_abertura:'Ticket: #987 Cliente alterou o plano'};
+  const repeated={...changed,id_atendimento:'106',protocolo:'202610010006'};
+  const result=classifyCommercialRows(worksheet([changed,repeated]),worksheet([orderFixture]));
   assert.equal(result.renewals.length,1);
-  assert.equal(result.renewals[0].id,renewal.protocolo);
+  assert.equal(result.renewals[0].id,changed.protocolo);
+});
+
+test('renovação e alteração de plano pendentes permanecem na origem e só contam após resolução',()=>{
+  for(const type of ['RENOVAÇÃO DE CONTRATO','ALTERAÇÃO DE PLANO']) {
+    const pending={...attendanceFixture,tipo_atendimento:type,status:'Pendente',descricao_abertura:'Ticket: #654 Alteração aceita, aguardando resolução'};
+    for(const status of ['Pendente',' pendente ','Em andamento','Aguardando Análise','']) {
+      const result=classifyCommercialRows(worksheet([{...pending,status}]),worksheet([orderFixture]));
+      assert.equal(result.renewals.length,0,`${type}: ${status} não é resolução`);
+      assert.equal(result.attendance.length,1,'atendimento permanece no volume e na origem');
+    }
+    for(const status of ['Resolvido',' resolvido ','Finalizado']) {
+      const resolved={...pending,status};
+      assert.equal(classifyCommercialRows(worksheet([resolved]),worksheet([orderFixture])).renewals.length,1);
+      const other={...resolved,id_atendimento:'102',protocolo:'202610010002'};
+      const result=classifyCommercialRows(worksheet([pending,other]),worksheet([orderFixture]));
+      assert.equal(result.renewals.length,1);
+      assert.equal(result.renewals[0].id,other.protocolo,'pendente não substitui o protocolo resolvido na deduplicação');
+    }
+  }
 });
 
 test('checklists não viram instalações, reativações ou prova de retirada, mas permanecem no volume bruto',()=>{

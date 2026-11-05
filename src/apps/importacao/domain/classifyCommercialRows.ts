@@ -388,10 +388,14 @@ function isInstallationAttendance(row: RowRecord): boolean {
 }
 
 // Renovação é uma métrica de atendimento, não de texto livre nem de OS. O
-// mesmo campo e valor do relatório oficial são usados para manter a contagem
-// auditável: Tipo de Atendimento = RENOVAÇÃO DE CONTRATO.
+// campo de tipo mantém a contagem auditável. A gestão também considera os
+// atendimentos de ALTERAÇÃO DE PLANO como renovação, independentemente de OS.
+// Só contam atendimentos resolvidos; Finalizado é o status legado das planilhas.
 function isRenewalAttendance(row: RowRecord): boolean {
-  return normalize(text(row, "tipo_atendimento")) === "renovacao de contrato";
+  const type = normalize(text(row, "tipo_atendimento"));
+  const status = normalize(text(row, "status"));
+  return (type === "renovacao de contrato" || type === "alteracao de plano")
+    && (status === "resolvido" || status === "finalizado");
 }
 
 function isReactivationServiceOrder(row: RowRecord): boolean {
