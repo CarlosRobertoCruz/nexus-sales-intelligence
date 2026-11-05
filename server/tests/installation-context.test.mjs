@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
 
+// Os cortes mensais seguem o fuso usado pelo contêiner de produção.
+process.env.TZ='America/Sao_Paulo';
 process.env.DATABASE_URL='postgresql://test:test@127.0.0.1:1/test';
 const {validateInstallationContextScope,planInstallationContext,captureInstallationContext,applyInstallationContext}=await import('../installationContext.mjs');
 const {upsertRows,rebuild}=await import('../records.mjs');
