@@ -196,6 +196,19 @@ test("documented flat OS customer display and nested attendance address are supp
   assert.equal(attendance.cidade, "Teste");
 });
 
+test('OS reconhece código delimitado no cliente textual, preserva precisão e rejeita conflito explícito',()=>{
+  const base={numero:'42',tipo:'Instalacao',status:'finalizado',data_inicio_programado:'2026-10-10 10:00:00'};
+  for(const cliente of ['12 - Cliente teste','(12) Cliente teste','12 Cliente teste','12 | Cliente teste',' (12) - Cliente teste ']) {
+    const order=normalizeHubsoft('serviceOrders',{...base,cliente});
+    assert.equal(order.codigo_cliente,'12');assert.equal(order.nome_razaosocial,'Cliente teste');
+  }
+  const code='123456789012345678901234567890';
+  assert.equal(normalizeHubsoft('serviceOrders',{...base,cliente:`(${code}) Cliente teste`}).codigo_cliente,code);
+  for(const cliente of ['Cliente 12','12Cliente teste','(12 Cliente teste','12','1'.repeat(41)+' - Cliente teste'])
+    assert.equal(normalizeHubsoft('serviceOrders',{...base,cliente}).codigo_cliente,'');
+  assert.throws(()=>normalizeHubsoft('serviceOrders',{...base,cliente:'(12) Cliente teste',codigo_cliente:'99'}),/HUBSOFT_OS_CLIENTE_DIVERGENTE/);
+});
+
 test("gateway HTML rate-limit responses still respect Retry-After", async () => {
  const {client,calls}=mock([token,new Response("Too many requests",{status:429,headers:{"Retry-After":"60"}})]);
  await assert.rejects(client.page("attendance","2026-10-10",0),/LIMITE/);

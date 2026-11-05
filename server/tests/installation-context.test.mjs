@@ -152,3 +152,67 @@ test('retomada reaproveita os detalhes validados e aplicação incompleta faz ro
     assert.equal(await count('commercial_records',"WHERE kind='sales'"),3);
   } finally {await pg.close();}
 });
+
+async function legacyOrders(query) {
+  const raw=[];
+  for(let i=1;i<=3;i++) {
+    const {rows}=await query("SELECT payload FROM source_records WHERE kind='serviceOrders' AND id=$1",[`hubsoft:${200+i}`]);
+    const {codigo_cliente,numero_ordem_servico,...order}=rows[0].payload;
+    raw.push({...order,numero:numero_ordem_servico,cliente:`(${codigo_cliente}) Cliente de teste`,atendimento:{id_atendimento:order.id_atendimento,protocolo:scope.targets[i-1].protocol}});
+    await query("UPDATE source_records SET payload=payload-'codigo_cliente' WHERE kind='serviceOrders' AND id=$1",[`hubsoft:${200+i}`]);
+  }
+  await query(`INSERT INTO history_pages(job_id,day,stream,page,records,complete,processed)
+    VALUES($1,'2026-10-01','serviceOrderCompletions',0,$2::jsonb,true,true)`,[jobId,JSON.stringify(raw)]);
+  return raw;
+}
+
+test('código ausente é recuperado do snapshot da mesma OS e só publicado após validar os atendimentos',async()=>{
+  const {pg,db,query,count}=await fixture();
+  try {
+    await legacyOrders(query);
+    const history=JSON.stringify((await query('SELECT payload FROM history_records ORDER BY upstream_id')).rows);
+    const snapshots=JSON.stringify((await query('SELECT records FROM history_pages')).rows);
+    const plan=await planInstallationContext(db,scope);
+    assert.ok(plan.targets.every(target=>target.clientRecoveredFromSnapshot));
+    assert.equal(await count('source_records',"WHERE kind='serviceOrders' AND payload ? 'codigo_cliente'"),0,'plano não corrige origem');
+    const client={gate:{interval:1000},attendanceDetail:async protocol=>detail(scope.targets.findIndex(t=>t.protocol===protocol)+1)};
+    await captureInstallationContext(db,client,scope,env);
+    assert.equal(await count('source_records',"WHERE kind='serviceOrders' AND payload ? 'codigo_cliente'"),0,'captura ainda não publica');
+    const cached=(await query("SELECT key,value FROM application_settings WHERE key LIKE 'hubsoft_installation_context:%' ORDER BY key")).rows;
+    await query('DELETE FROM application_settings WHERE key=$1',[cached[2].key]);
+    await assert.rejects(applyInstallationContext(db,scope,env),/CONTEXTO_CACHE_DIVERGENTE/);
+    assert.equal(await count('source_records',"WHERE kind='serviceOrders' AND payload ? 'codigo_cliente'"),0,'falha reverte também os códigos das OS anteriores');
+    await query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[cached[2].key,JSON.stringify(cached[2].value)]);
+    await applyInstallationContext(db,scope,env);
+    assert.equal(await count('commercial_records',"WHERE kind='sales'"),3);
+    assert.equal(await count('commercial_records',"WHERE kind='renewals'"),1);
+    assert.equal(await count('source_records',"WHERE kind='serviceOrders' AND payload ? 'codigo_cliente'"),3);
+    assert.equal(JSON.stringify((await query('SELECT payload FROM history_records ORDER BY upstream_id')).rows),history);
+    assert.equal(JSON.stringify((await query('SELECT records FROM history_pages')).rows),snapshots);
+    await applyInstallationContext(db,scope,env);
+    assert.equal(await count('source_records'),7);assert.equal(await count('commercial_records',"WHERE kind='sales'"),3);
+  } finally {await pg.close();}
+});
+
+test('recuperação exige snapshots inequívocos e nunca aceita cliente diferente no detalhe',async()=>{
+  const {pg,db,query,count}=await fixture();
+  try {
+    const raw=await legacyOrders(query);
+    const single={...scope,targets:[scope.targets[0]]};
+    for(const change of [
+      {numero:'999'}, {id_atendimento:'999'}, {atendimento:{protocolo:'999'}}, {deleted_at:'2026-11-05'},
+      {cliente:'Cliente sem código'}, {codigo_cliente:'999'},
+    ]) {
+      await query('UPDATE history_pages SET records=$1::jsonb',[JSON.stringify([{...raw[0],...change}])]);
+      await assert.rejects(planInstallationContext(db,single));
+    }
+    await query('UPDATE history_pages SET records=$1::jsonb',[JSON.stringify([raw[0],{...raw[0],cliente:'(999) Outro cliente'}])]);
+    await assert.rejects(planInstallationContext(db,single),/CONTEXTO_CLIENTE_DIVERGENTE/);
+    await query('UPDATE history_pages SET records=$1::jsonb',[JSON.stringify(raw)]);
+    await assert.rejects(captureInstallationContext(db,{gate:{interval:1000},attendanceDetail:async()=>({...detail(1),codigo_cliente:'999'})},single,env),/CONTEXTO_ATENDIMENTO_DIVERGENTE/);
+    assert.equal(await count('application_settings',"WHERE key LIKE 'hubsoft_installation_context:%'"),0);
+    await query('UPDATE history_pages SET processed=false');
+    await assert.rejects(planInstallationContext(db,single),/CONTEXTO_CLIENTE_SEM_EVIDENCIA/);
+    assert.equal(await count('source_records',"WHERE kind='serviceOrders' AND payload ? 'codigo_cliente'"),0);
+  } finally {await pg.close();}
+});
