@@ -97,10 +97,9 @@ function eventTextFingerprint(combinedText: string): string {
 }
 
 function commercialBusinessKey(kind: "sale" | "renewal", row: RowRecord, combinedText: string, protocol: string): string {
-  const normalized = normalize(combinedText);
-  if (kind === "renewal" && /altera[cç][aã]o de titularidade/.test(normalized)) {
-    return `${kind}:titularidade:${eventTextFingerprint(combinedText)}`;
-  }
+  // One customer/ticket can cover several services with identical descriptions.
+  // For renewals, only the attendance identity can prove a repeated import.
+  if (kind === "renewal") return `renewal:protocolo:${protocol}`;
 
   const customer = eventCustomerKey(row);
   const ticket = [...new Set(extractTicketIds(combinedText))].sort((left, right) => Number(left) - Number(right))[0];

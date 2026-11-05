@@ -38,12 +38,31 @@ test('renovações aceitam os dois tipos confirmados pela gestão, sem usar men�
   assert.equal(result.sales.length,0,'alteração de plano não se transforma em instalação');
 });
 
-test('alteração de plano usa o mesmo tratamento de acentos e deduplicação das renovações',()=>{
+test('protocolos distintos do mesmo cliente e ticket não perdem renovações de planos diferentes',()=>{
   const changed={...attendanceFixture,id_atendimento:'105',protocolo:'202610010005',tipo_atendimento:'  alteracao de plano  ',descricao_abertura:'Ticket: #987 Cliente alterou o plano'};
-  const repeated={...changed,id_atendimento:'106',protocolo:'202610010006'};
-  const result=classifyCommercialRows(worksheet([changed,repeated]),worksheet([orderFixture]));
-  assert.equal(result.renewals.length,1);
-  assert.equal(result.renewals[0].id,changed.protocolo);
+  const otherService={...changed,id_atendimento:'106',protocolo:'202610010006'};
+  const result=classifyCommercialRows(worksheet([changed,otherService]),worksheet([orderFixture]));
+  assert.deepEqual(result.renewals.map(row=>row.id),[changed.protocolo,otherService.protocolo]);
+  assert.equal(new Set(result.renewals.map(row=>row.businessKey)).size,2);
+});
+
+test('texto copiado, referência de OS e titularidade não fundem protocolos de renovação',()=>{
+  for(const description of ['Cliente aceitou o benefício', 'Ordem de serviço 987', 'Alteração de titularidade com renovação']) {
+    const first={...attendanceFixture,tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:description};
+    const second={...first,id_atendimento:'102',protocolo:'202610010002'};
+    const result=classifyCommercialRows(worksheet([first,second]),worksheet([orderFixture]));
+    assert.equal(result.renewals.length,2,description);
+  }
+});
+
+test('reimportar o mesmo atendimento ou protocolo não duplica renovações',()=>{
+  const first={...attendanceFixture,tipo_atendimento:'RENOVAÇÃO DE CONTRATO'};
+  const legacy={...first,id_atendimento:undefined};
+  const repeated={...first,descricao_abertura:'Descrição atualizada'};
+  assert.equal(classifyCommercialRows(worksheet([first,repeated]),worksheet([orderFixture])).renewals.length,1);
+  const result=classifyCommercialRows(worksheet([legacy,first]),worksheet([orderFixture]));
+  assert.equal(result.renewals.length,1,'mesmo protocolo em planilha e API representa um atendimento');
+  assert.equal(result.renewals[0].id,first.protocolo);
 });
 
 test('renovação e alteração de plano pendentes permanecem na origem e só contam após resolução',()=>{
