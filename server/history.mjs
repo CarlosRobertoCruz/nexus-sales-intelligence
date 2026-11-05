@@ -225,19 +225,26 @@ export async function approveHistoryMonth(pool,id,evidence) {
     const reports=job.phase==='history'?job.manifest.monthReports[month]:job.manifest.reports;
     const incomplete=rows.filter(row=>row.kind==='attendance'&&row.payload.classification_status==='incomplete').length;
     if(incomplete&&evidence.confirmIncompleteRecords!==true) throw codeError('REVISAO_CAMPOS_INCOMPLETOS_OBRIGATORIA');
+    const reportScopes={};
     for(const kind of ['attendance','serviceOrders']) {
       const supplied=evidence[kind];
       const comparison=compareHistoryReport(kind,rows.filter(row=>row.kind===kind),supplied,reports[kind]);
       if(comparison.ambiguous.length) throw codeError('IDENTIDADE_RELATORIO_AMBIGUA');
       if(comparison.blocker) throw codeError(comparison.blocker);
       if(comparison.status!=='matched') throw codeError('RECONCILIACAO_DIVERGENTE');
+      if(comparison.commercialScope) reportScopes[kind]={
+        reportSha256:reports[kind].fileSha256,rawStatus:comparison.rawStatus,
+        expected:comparison.expected,actual:comparison.actual,missing:comparison.missing,
+        commercialScope:comparison.commercialScope,
+        ...(comparison.reportTypeReview?{reportTypeReview:comparison.reportTypeReview}:{}),
+      };
       await upsertRows(db,kind,rows.filter(row=>row.kind===kind).map(row=>row.payload),'hubsoft');
     }
     const followup=job.manifest.followupCutoff ? await publishFollowups(db,id,month,job.manifest.followupCutoff,evidence.followup,reports.followup) : undefined;
     // Atualiza os indicadores somente na mesma transação da publicação aprovada.
     await rebuild(db);
     const done=job.month_index+1>=monthsFor(job.manifest).length;
-    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),incompleteAttendances:incomplete,discardedDraftAttendances:discardedDrafts.length,confirmedIncompleteRecords:incomplete?evidence.confirmIncompleteRecords===true:false,attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
+    await db.query("UPDATE history_months SET state='published',reconciliation=$3::jsonb WHERE job_id=$1 AND month=$2",[id,month,JSON.stringify({reviewer:evidence.reviewer,at:new Date().toISOString(),...(followup ? {followup} : {}),...(Object.keys(reportScopes).length?{reportScopes}:{}),incompleteAttendances:incomplete,discardedDraftAttendances:discardedDrafts.length,confirmedIncompleteRecords:incomplete?evidence.confirmIncompleteRecords===true:false,attendance:rows.filter(r=>r.kind==='attendance').length,serviceOrders:rows.filter(r=>r.kind==='serviceOrders').length})]);
     await db.query("UPDATE history_jobs SET state=$2,approved=$3,month_index=month_index+1,next_at=now()+interval '5 minutes',error_code=NULL,updated_at=now() WHERE id=$1",[id,done?'complete':'running',done]);
     await db.query('COMMIT');
     return historyStatus(db,id);

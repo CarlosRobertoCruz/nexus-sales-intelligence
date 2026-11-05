@@ -1,4 +1,4 @@
-import {exactId,validateManifest,monthsFor,checklistExclusions,reviewedScopeExclusions} from './historyPolicy.mjs';
+import {exactId,validateManifest,monthsFor,checklistExclusions,reviewedScopeExclusions,reportTypeExclusions} from './historyPolicy.mjs';
 import {capturedDraftAttendanceIds} from './historyDrafts.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const native={attendance:'id_atendimento',serviceOrders:'id_ordem_servico'};
@@ -20,10 +20,15 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
   }
   const exclusions=checklistExclusions(kind,reference);
   const reviewed=reviewedScopeExclusions(kind,reference);
-  const commercialExclusions=new Set([...exclusions,...reviewed]);
+  const reportTypes=reportTypeExclusions(kind,reference);
+  const commercialExclusions=new Set([...exclusions,...reviewed,...reportTypes]);
+  const normalizeType=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase();
+  const typeEvidence=new Map((reference.reportTypeExclusions?.orders??[]).map(item=>[item.key,item]));
   const found=new Map(),seenIds=new Set();
   for(const row of rows) {
     const id=exactId(row.upstream_id),key=field===native[kind]?id:exactId(row.payload?.[field]);
+    if(reportTypes.has(key)&&row.payload?.tipo_ordem_servico&&
+      normalizeType(row.payload.tipo_ordem_servico)!==normalizeType(typeEvidence.get(key).orderType)) return fail('TIPO_OS_RELATORIO_DIVERGENTE');
     if(seenIds.has(id)) return fail('ID_ORIGEM_DUPLICADO');
     seenIds.add(id);
     found.set(key,[...(found.get(key)??[]),id]);
@@ -40,6 +45,7 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
     actual:[...found.values()].reduce((sum,ids)=>sum+ids.length,0)-[...commercialExclusions].reduce((sum,key)=>sum+(found.get(key)?.length??0),0),
     excludedChecklistKeys:[...exclusions].sort(),
     reviewedOutOfScopeKeys:[...reviewed].sort(),
+    ...(reportTypes.size?{reportTypeExcludedKeys:[...reportTypes].sort()}:{}),
     missing:missing.filter(key=>!commercialExclusions.has(key)),extra:extra.filter(key=>!commercialExclusions.has(key)),
     ambiguous:ambiguous.filter(item=>!commercialExclusions.has(item.key)),
     sourceReconciliationRequired:true,
@@ -59,7 +65,13 @@ export function compareHistoryReport(kind,rows,evidence,reference) {
     ? 'ESCOPO_RELATORIO_NAO_COMPARAVEL' : null;
   const status=commercialScope?(commercialBlocker?'blocked':commercialMatches?'matched':'divergent'):rawStatus;
   const effectiveBlocker=commercialScope?(commercialBlocker??(commercialMatches?null:blocker)):blocker;
-  return {...(scopeReview ? {scopeReview} : {}),...(commercialScope ? {commercialScope} : {}),status,blocker:effectiveBlocker,
+  const reportTypeReview=reportTypes.size?{
+    reportSha256:reference.reportTypeExclusions.reportSha256,
+    reason:reference.reportTypeExclusions.reason,
+    orders:reference.reportTypeExclusions.orders.map(({key,orderType,completedOn})=>({key,orderType,completedOn})),
+    publicationApproved:false,
+  }:undefined;
+  return {...(scopeReview ? {scopeReview} : {}),...(reportTypeReview?{reportTypeReview}:{}),...(commercialScope ? {commercialScope} : {}),status,blocker:effectiveBlocker,
     rawStatus,rawBlocker:blocker,
     keyField:field,expected:wanted.size,actual:rows.length,missing,extra,ambiguous,mapping};
 }

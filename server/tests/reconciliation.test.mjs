@@ -100,3 +100,62 @@ test('revisão de suporte exige origem, destino não comercial, datas e chave es
     assert.throws(()=>compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref),/REVISAO_ESCOPO_INVALIDA/);
   }
 });
+
+const reportTypedReference=()=>({...reference,keys:['74','96','200','300','400','500'],
+  exportFilters:{dateField:'data_termino_executado',start:'2026-10-01',end:'2026-10-31'},
+  commercialExclusions:{reason:'checklist',keys:['200']},
+  reportTypeExclusions:{reason:'non_commercial_order_type',reportSha256:reference.fileSha256,orders:[
+    {key:'300',orderType:'(SFN) SUPORTE',completedOn:'2026-10-01'},
+    {key:'400',orderType:'MANUTENÇÃO',completedOn:'2026-10-14'},
+    {key:'500',orderType:'ABERTURA DE CTO',completedOn:'2026-10-14'},
+  ]}});
+
+test('tipos técnicos documentados no relatório preservam divergência bruta e todas as chaves',()=>{
+  const ref=reportTypedReference(),original=structuredClone(ref);
+  const result=compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref);
+  assert.equal(result.status,'matched');assert.equal(result.rawStatus,'divergent');
+  assert.equal(result.expected,6);assert.equal(result.actual,2);
+  assert.deepEqual(result.missing,['200','300','400','500']);
+  assert.equal(result.commercialScope.expected,2);assert.equal(result.commercialScope.actual,2);
+  assert.deepEqual(result.commercialScope.reportTypeExcludedKeys,['300','400','500']);
+  assert.deepEqual(result.reportTypeReview.orders,ref.reportTypeExclusions.orders);
+  assert.equal(result.reportTypeReview.publicationApproved,false);
+  assert.deepEqual(ref,original,'conferência não altera o relatório nem cria aprovação');
+});
+
+test('exclusões técnicas não escondem OS comercial ausente, extra ou ambígua',()=>{
+  const ref=reportTypedReference(),ev={reportSha256:ref.fileSha256,keys:ref.keys};
+  assert.equal(compareHistoryReport('serviceOrders',[rows[0]],ev,ref).status,'divergent');
+  assert.equal(compareHistoryReport('serviceOrders',[...rows,{upstream_id:'999',payload:{numero_ordem_servico:'700'}}],ev,ref).status,'divergent');
+  assert.equal(compareHistoryReport('serviceOrders',[...rows,{upstream_id:'999',payload:{numero_ordem_servico:'74'}}],ev,ref).status,'divergent');
+  const wrongDate={...ref,exportFilters:{...ref.exportFilters,dateField:'data_cadastro'}};
+  assert.throws(()=>compareHistoryReport('serviceOrders',rows,ev,wrongDate),/EXCLUSOES_TIPO_RELATORIO_INVALIDAS/);
+});
+
+test('exclusão por tipo exige hash, tipo exato, data válida, chave única e ausência de sobreposição',()=>{
+  const invalid=[
+    ref=>{ref.reportTypeExclusions.reportSha256='b'.repeat(64);},
+    ref=>{ref.reportTypeExclusions.reason='ignore';},
+    ref=>{ref.reportTypeExclusions.orders=[];},
+    ref=>{ref.reportTypeExclusions.orders.push(ref.reportTypeExclusions.orders[0]);},
+    ref=>{ref.reportTypeExclusions.orders[0].key='999';},
+    ref=>{ref.reportTypeExclusions.orders[0].key='200';},
+    ref=>{ref.reportTypeExclusions.orders[0].completedOn='2026-11-01';},
+    ref=>{ref.reportTypeExclusions.orders[0].completedOn='2026-10-32';},
+    ref=>{ref.exportFilters.start='2026-10-32';},
+    ...['INSTALAÇÃO','RETIRADA','CANCELAMENTO','REATIVAÇÃO DE CONTRATO','RENOVAÇÃO DE CONTRATO','SUPORTE INSTALAÇÃO','SUPORTE'].map(type=>ref=>{ref.reportTypeExclusions.orders[0].orderType=type;}),
+  ];
+  for(const change of invalid) {
+    const ref=reportTypedReference();change(ref);
+    assert.throws(()=>compareHistoryReport('serviceOrders',rows,{reportSha256:ref.fileSha256,keys:ref.keys},ref),/EXCLUSOES_TIPO_RELATORIO_INVALIDAS/);
+  }
+  const ref=reportTypedReference();ref.keyField='protocolo';
+  assert.throws(()=>compareHistoryReport('attendance',[],{reportSha256:ref.fileSha256,keys:ref.keys},ref),/EXCLUSOES_COMERCIAIS_INVALIDAS|EXCLUSOES_TIPO_RELATORIO_INVALIDAS/);
+});
+
+test('tipo coletado que contradiz o relatório não pode ser excluído',()=>{
+  const ref=reportTypedReference(),ev={reportSha256:ref.fileSha256,keys:ref.keys};
+  assert.throws(()=>compareHistoryReport('serviceOrders',[...rows,{upstream_id:'333',payload:{numero_ordem_servico:'300',tipo_ordem_servico:'INSTALAÇÃO'}}],ev,ref),/TIPO_OS_RELATORIO_DIVERGENTE/);
+  const result=compareHistoryReport('serviceOrders',[...rows,{upstream_id:'333',payload:{numero_ordem_servico:'400',tipo_ordem_servico:'manutencao'}}],ev,ref);
+  assert.equal(result.status,'matched');assert.equal(result.actual,3);assert.equal(result.commercialScope.actual,2);
+});

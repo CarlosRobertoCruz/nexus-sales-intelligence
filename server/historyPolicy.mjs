@@ -51,6 +51,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
     if(report.keys!==undefined&&(!Array.isArray(report.keys)||report.keys.length>50000||new Set(report.keys.map(exactId)).size!==report.keys.length)) return fail('CHAVES_RELATORIO_DUPLICADAS');
     checklistExclusions(kind,report);
     reviewedScopeExclusions(kind,report);
+    reportTypeExclusions(kind,report);
     if(report.filters.addressType!==undefined&&report.filters.addressType!=='instalacao') return fail('TIPO_ENDERECO_NAO_MAPEADO');
     if(report.exportFilters?.dateField!==undefined&&!['data_cadastro','data_fechamento','data_inicio_programado','data_termino_executado'].includes(report.exportFilters.dateField)) return fail('CAMPO_DATA_EXPORTACAO_INVALIDO');
     if(report.filters.otherFilters!=='none') return fail('FILTROS_ADICIONAIS_EXIGEM_MAPEAMENTO');
@@ -131,5 +132,40 @@ export function reviewedScopeExclusions(kind,reference) {
     keys.add(key);
   }
   if(reference.scopeReview.resolved===true && (reference.scopeReview.unassignedCustomerKeys??[]).some(key=>!keys.has(exactId(key)))) return invalid();
+  return keys;
+}
+
+// Report-backed business scope, independent of destination. An absent client
+// never proves an internal destination. Only these explicitly reviewed types
+// may be excluded, with the original report hash, key and completion date.
+export function reportTypeExclusions(kind,reference) {
+  const review=reference?.reportTypeExclusions;
+  if(review===undefined) return new Set();
+  const invalid=()=>fail('EXCLUSOES_TIPO_RELATORIO_INVALIDAS');
+  if(kind!=='serviceOrders'||reference.keyField!=='numero_ordem_servico'||
+    !Array.isArray(reference.keys)||reference.filters?.dateField!=='data_termino_executado'||
+    reference.exportFilters?.dateField!=='data_termino_executado'||
+    typeof reference.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(reference.fileSha256)||
+    review.reportSha256!==reference.fileSha256||review.reason!=='non_commercial_order_type'||
+    !Array.isArray(review.orders)||!review.orders.length||review.orders.length>50000) return invalid();
+  const start=reference.exportFilters.start,end=reference.exportFilters.end;
+  try {
+    for(const day of [start,end]) {
+      if(!/^2026-\d{2}-\d{2}$/.test(day??'')) return invalid();
+      const [y,m,d]=day.split('-');localDay(`${d}/${m}/${y}`);
+    }
+  } catch {return invalid();}
+  if(start>end) return invalid();
+  const source=new Set(reference.keys.map(exactId));
+  const other=new Set([...checklistExclusions(kind,reference),...reviewedScopeExclusions(kind,reference)]);
+  const keys=new Set(),allowed=new Set(['(SFN) SUPORTE','MANUTENCAO','ABERTURA DE CTO']);
+  for(const item of review.orders) {
+    const key=exactId(item?.key);
+    const type=typeof item.orderType==='string'?item.orderType.normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toUpperCase():'';
+    if(!source.has(key)||keys.has(key)||other.has(key)||!allowed.has(type)||
+      !/^2026-\d{2}-\d{2}$/.test(item.completedOn??'')||item.completedOn<start||item.completedOn>end) return invalid();
+    try {const [y,m,d]=item.completedOn.split('-');localDay(`${d}/${m}/${y}`);} catch {return invalid();}
+    keys.add(key);
+  }
   return keys;
 }
