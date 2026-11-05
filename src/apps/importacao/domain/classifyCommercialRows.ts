@@ -205,10 +205,15 @@ function attendanceForInstallationOrder(order: ServiceOrder, attendanceRows: Rea
   if (order.attendanceId) {
     return attendanceRows.find(row=>eligibleForClassification(row)&&text(row,"id_atendimento")===order.attendanceId
       && isInstallationAttendance(row)
+      && (text(row,"publication_scope")!=="installation_context"
+        || (order.id.startsWith("hubsoft:")
+          && text(row,"installation_context_order_ids").split(",").includes(order.id.slice(8))
+          && Boolean(order.customerCode) && text(row,"codigo_cliente")===order.customerCode))
       && (parseDate(row.data_cadastro)?.getTime() ?? Infinity)<=(order.executionStartedAt?.getTime() ?? 0));
   }
   if (order.id.startsWith("hubsoft:")) return undefined;
   const sameCustomer = attendanceRows.filter((row) => {
+    if (text(row,"publication_scope")==="installation_context") return false;
     if (!eligibleForClassification(row)) return false;
     const customerCode = text(row, "codigo_cliente");
     if (order.customerCode && customerCode) return order.customerCode === customerCode;
@@ -406,8 +411,10 @@ export function classifyCommercialRows(
   serviceOrders: ImportedWorksheet,
 ): ClassifiedCommercialImport {
   const rawAttendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
-  const discardedDrafts=rawAttendanceRows.filter(isDiscardedDraft);
-  const attendanceRows=rawAttendanceRows.filter(row=>!isDiscardedDraft(row));
+  const contextRows=rawAttendanceRows.filter(row=>text(row,"publication_scope")==="installation_context");
+  const reportedRows=rawAttendanceRows.filter(row=>text(row,"publication_scope")!=="installation_context");
+  const discardedDrafts=reportedRows.filter(isDiscardedDraft);
+  const attendanceRows=reportedRows.filter(row=>!isDiscardedDraft(row));
   const osRows = deduplicateRows(rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço").filter((row) => /^\d+$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
   if (!attendanceRows.length) throw new Error("Nenhum atendimento válido foi encontrado no arquivo selecionado.");
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
@@ -477,7 +484,7 @@ export function classifyCommercialRows(
 
   for (const linkedOrder of orders.all) {
     if (!isCompletedInstallationOrder(linkedOrder) || !linkedOrder.executionFinishedAt) continue;
-    const row = attendanceForInstallationOrder(linkedOrder, attendanceRows);
+    const row = attendanceForInstallationOrder(linkedOrder, [...attendanceRows,...contextRows]);
     if (!row) continue;
     const combined = installationText(row);
     const commercialDate = linkedOrder.executionFinishedAt;
