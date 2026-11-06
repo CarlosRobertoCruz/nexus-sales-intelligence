@@ -1,5 +1,6 @@
 import type { CancellationReasonId, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReactivation, ClassifiedRenewal, ClassifiedSale, ImportedWorksheet, ProcessedAttendance, SpreadsheetCell } from "../types/spreadsheetImport";
+import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
 
 type RowRecord = Readonly<Record<string, SpreadsheetCell>>;
 type ServiceOrder = {
@@ -29,12 +30,7 @@ type ServiceOrderIndex = {
 const REQUIRED_ATTENDANCE_HEADERS = ["protocolo", "nome_razaosocial", "descricao_abertura", "data_cadastro", "usuario_abertura", "status", "tipo_atendimento"] as const;
 const REQUIRED_OS_HEADERS = ["numero_ordem_servico", "tipo_ordem_servico", "status", "data_inicio_programado", "data_inicio_executado", "data_termino_executado"] as const;
 
-const SELLERS: ReadonlyArray<{ id: SellerId; name: string; pattern: RegExp }> = [
-  { id: "beatriz", name: "Beatriz", pattern: /\bbeatriz\b/ },
-  { id: "karini", name: "Karini", pattern: /\bkarini\b/ },
-  { id: "giovanna", name: "Giovanna", pattern: /\bgiovanna\b/ },
-  { id: "sara", name: "Sara", pattern: /\bsara\b/ },
-];
+const SELLERS = COMMERCIAL_SELLERS;
 
 const PLANS: ReadonlyArray<{ id: SalesPlanId; label: string; pattern: RegExp }> = [
   { id: "combo-total-plus", label: "600 Mega Combo Total Plus", pattern: /600\s*mega\s*combo\s*total\s*plus/ },
@@ -315,20 +311,6 @@ function locationFromAttendance(row: RowRecord, order: ServiceOrder | undefined,
   return known.find((location) => normalizedText.includes(normalize(location))) ?? "Não informada";
 }
 
-function hasAlternativeToCancellation(combinedText: string): boolean {
-  const normalized = normalize(combinedText);
-  return /(?:foi )?realizad[oa] (?:a )?alteracao (?:do|de) plano|mediante renovacao contratual/.test(normalized)
-    || /optou (?:por|pela) suspensao temporaria|suspensao temporaria (?:foi )?realizada|prosseguir com a suspensao/.test(normalized);
-}
-
-function isCompletedCancellation(combinedText: string, order: ServiceOrder | undefined): boolean {
-  const normalized = normalize(combinedText);
-  if (hasAlternativeToCancellation(combinedText)) return false;
-  if (/n[aã]o deseja mais realizar o cancelamento|desistiu do cancelamento|n[aã]o foi poss[ií]vel.*(?:concluir|prosseguir).*cancelamento/.test(normalized)) return false;
-  if (order && /retirada/.test(normalize(order.type)) && normalize(order.status) === "finalizado") return true;
-  return /cancelamento (?:foi )?(?:realizado|conclu[ií]do|efetivado)|(?:contrato|servi[cç]o) (?:foi )?cancelad[oa]|retirada (?:foi|ser[aá]) agendada/.test(normalized);
-}
-
 function isChecklistOrder(row: RowRecord): boolean {
   return /\bcheck[\s-]*list\b/.test(normalize(text(row, "tipo_ordem_servico")));
 }
@@ -394,12 +376,59 @@ function isInstallationAttendance(row: RowRecord): boolean {
 // Renovação é uma métrica de atendimento, não de texto livre nem de OS. O
 // campo de tipo mantém a contagem auditável. A gestão também considera os
 // atendimentos de ALTERAÇÃO DE PLANO como renovação, independentemente de OS.
-// Só contam atendimentos resolvidos; Finalizado é o status legado das planilhas.
+// A gestão inclui pendentes desde 06/11/2026. Finalizado é o status legado.
 function isRenewalAttendance(row: RowRecord): boolean {
   const type = normalize(text(row, "tipo_atendimento"));
   const status = normalize(text(row, "status"));
   return (type === "renovacao de contrato" || type === "alteracao de plano")
-    && (status === "resolvido" || status === "finalizado");
+    && (status === "resolvido" || status === "finalizado" || status === "pendente");
+}
+
+// O relatório usa o tipo e o status do atendimento. Texto livre ou uma OS
+// de retirada não comprovam que este atendimento seja um cancelamento resolvido.
+function isCancellationAttendance(row: RowRecord): boolean {
+  return normalize(text(row, "tipo_atendimento")) === "cancelamento"
+    && normalize(text(row, "status")) === "resolvido";
+}
+
+type CancellationOutcome = "confirmed" | "reversed" | "pending" | "review";
+
+function cancellationOutcome(row: RowRecord, orders: ServiceOrderIndex): CancellationOutcome {
+  // The closing describes the outcome; the opening may still describe an old
+  // request, an alternative subsequently refused, or outstanding initial steps.
+  const closing = text(row, "descricao_fechamento");
+  const finalText = normalize((closing || text(row, "descricao_abertura")).replace(/\r?\n+/g, "; "));
+  const reversed = /\bdesistiu (?:da solicitacao de |do )cancelamento\b/.test(finalText)
+    || /\bcancelamento(?:\s+\w+){0,4}\s+(?:nao foi realizad[oa]|foi revertid[oa]|foi desfeit[oa])\b/.test(finalText)
+    || /\bnao deseja mais (?:realizar |prosseguir com )?(?:o )?cancelamento\b/.test(finalText);
+  const pending = /\bcancelamento (?:ainda )?(?:(?:permanece|esta|segue) )?(?:pendente|em andamento)\b/.test(finalText)
+    || /\b(?:conclusao|efetivacao)(?: definitiva)? do cancelamento (?:ainda )?(?:(?:permanece|esta|segue) )?(?:pendente|nao confirmad[oa])\b/.test(finalText)
+    || /\b(?:atendimento|contato) (?:foi )?finalizado por (?:falta de (?:comunicacao|retorno)|ausencia de (?:retorno|resposta))\b/.test(finalText);
+  const confirmedInText = /(?:^|[.!?;]\s*)(?:o )?cancelamento (?:definitivo )?(?:foi |esta )?(?:realizado|concluido|efetivado)\b/.test(finalText)
+    || /(?:^|[.!?;]\s*)(?:o )?(?:contrato|servico|plano) (?:foi |esta )?cancelad[oa]\b/.test(finalText);
+  if ((reversed || pending) && confirmedInText) return "review";
+  if (reversed) return "reversed";
+  if (pending) return "pending";
+  if (confirmedInText) return "confirmed";
+
+  // Proof must belong to this attendance or be explicitly referenced in its
+  // outcome. Never use the generic customer/ticket fallback for cancellation.
+  const reference = extractOrderId(closing || text(row, "descricao_abertura"));
+  const attendanceId = text(row, "id_atendimento");
+  const candidates = [
+    ...(attendanceId ? orders.byAttendanceId.get(attendanceId) ?? [] : []),
+    ...(reference && orders.byId.has(reference) ? [orders.byId.get(reference)!] : []),
+  ];
+  const openedAt = parseDate(row.data_cadastro)?.getTime() ?? Infinity;
+  const completedWithdrawal = candidates.some(order => {
+    if (attendanceId && order.attendanceId && order.attendanceId !== attendanceId) return false;
+    if (text(row, "codigo_cliente") && order.customerCode && text(row, "codigo_cliente") !== order.customerCode) return false;
+    return normalize(order.type) === "retirada" && normalize(order.status) === "finalizado"
+      && order.executionStartedAt !== null && order.executionFinishedAt !== null
+      && order.executionFinishedAt.getTime() >= order.executionStartedAt.getTime()
+      && order.executionFinishedAt.getTime() >= openedAt;
+  });
+  return completedWithdrawal ? "confirmed" : "review";
 }
 
 function isReactivationServiceOrder(row: RowRecord): boolean {
@@ -430,6 +459,7 @@ export function classifyCommercialRows(
   const dates: Date[] = [];
   let linkedServiceOrders = 0;
   const classifiedProtocols = new Set<string>();
+  const cancellationOutcomes = { reversed: 0, pending: 0, review: 0 };
 
   for (const row of attendanceRows) {
     const date = parseDate(row.data_cadastro);
@@ -437,7 +467,6 @@ export function classifyCommercialRows(
     dates.push(date);
     const combined = `${text(row, "descricao_abertura")} ${text(row, "descricao_fechamento")}`;
     const protocol = text(row, "protocolo");
-    const normalized = normalize(combined);
     const linkedOrder = resolveServiceOrder(row, combined, orders);
     if (linkedOrder) linkedServiceOrders += 1;
     processedAttendance.push({ id: text(row,"id_atendimento") ? `hubsoft:${text(row,"id_atendimento")}` : protocol, date, linkedServiceOrder: Boolean(linkedOrder) });
@@ -457,15 +486,17 @@ export function classifyCommercialRows(
         benefitLabel: benefit.label,
         sellerName: seller.name,
         location: locationFromAttendance(row, linkedOrder, combined),
-        completed: true,
+        completed: normalize(text(row, "status")) !== "pendente",
       });
       classifiedProtocols.add(protocol);
     }
 
-    const hasCancellation = /\bcancela(mento|r|do|da)|cancelou\b/.test(normalized)
-      || /retirada/.test(normalize(linkedOrder?.type ?? ""));
-    const cancellationCompleted = hasCancellation && isCompletedCancellation(combined, linkedOrder);
-    if (cancellationCompleted) {
+    if (isCancellationAttendance(row)) {
+      const outcome = cancellationOutcome(row, orders);
+      if (outcome !== "confirmed") {
+        cancellationOutcomes[outcome] += 1;
+        continue;
+      }
       const reason = extractCancellationReason(combined);
       cancellations.push({
         id: protocol,
@@ -526,6 +557,11 @@ export function classifyCommercialRows(
   const incompleteAttendances=attendanceRows.filter(row=>!eligibleForClassification(row)).length;
   if(discardedDrafts.length) warnings.push(`${discardedDrafts.length} rascunho(s) abandonado(s) foram preservados na origem e excluidos de todos os indicadores.`);
   if(incompleteAttendances) warnings.push(`${incompleteAttendances} atendimento(s) com dados incompletos foram contabilizados sem classificação comercial automática. Revise os campos ausentes na origem.`);
+  const pendingRenewals = renewals.filter(renewal => !renewal.completed).length;
+  if (pendingRenewals) warnings.push(`${pendingRenewals} renovação(ões) pendente(s) incluída(s) na contagem do período, mantendo seu status de pendência.`);
+  if (cancellationOutcomes.reversed) warnings.push(`${cancellationOutcomes.reversed} atendimento(s) de cancelamento resolvido(s) com desistência ou reversão foram excluídos do indicador.`);
+  if (cancellationOutcomes.pending) warnings.push(`${cancellationOutcomes.pending} atendimento(s) de cancelamento resolvido(s) descrevem um processo ainda pendente e foram excluídos do indicador.`);
+  if (cancellationOutcomes.review) warnings.push(`${cancellationOutcomes.review} atendimento(s) de cancelamento resolvido(s) exigem conferência do desfecho: conclusão sem comprovação ou informações conflitantes. Foram preservados na origem e excluídos do indicador automático.`);
   const uniqueSales = deduplicateCommercialEvents(sales);
   const uniqueRenewals = deduplicateCommercialEvents(renewals);
   if (commercialNames / attendanceRows.length < 0.7) warnings.push("A maior parte dos atendimentos não pertence à equipe comercial conhecida. Confirme o filtro do relatório.");

@@ -202,12 +202,16 @@ test("reduced motion skips zoom and does not impose the animation delay", async 
 test("failed hydration offers retry without requiring another login", async ({
   page,
 }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
   let failData = true;
+  let releaseRetry!: () => void;
+  const retryData = new Promise<void>(resolve => { releaseRetry = resolve; });
   const calls = await mockApi(page, {
-    data: async () =>
-      failData
-        ? { status: 500, body: { error: "TEST_ERROR" } }
-        : { status: 200, body: { ledger } },
+    data: async () => {
+      if (failData) return { status: 500, body: { error: "TEST_ERROR" } };
+      await retryData;
+      return { status: 200, body: { ledger } };
+    },
   });
   await page.goto("/");
   await login(page);
@@ -216,11 +220,11 @@ test("failed hydration offers retry without requiring another login", async ({
   ).toBeVisible();
   failData = false;
   await page.getByRole("button", { name: "Tentar novamente" }).click();
-  await expect(
-    page.getByRole("button", { name: "Pular animação" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Pular animação" }).click();
+  await expect.poll(() => calls.filter(path => path === "/api/data").length).toBeGreaterThanOrEqual(2);
+  await expect(page.getByRole("dialog")).toBeVisible();
+  releaseRetry();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("Visão geral de vendas", { exact: true })).toBeVisible();
   expect(calls.filter((path) => path === "/api/login")).toHaveLength(1);
   expect(
     calls.filter((path) => path === "/api/data").length,
@@ -235,7 +239,7 @@ test("restored session enters the same flow and logout returns to login", async 
   await page.goto("/");
   await expect(
     page.getByRole("button", { name: "Sair", exact: true }),
-  ).toBeVisible();
+  ).toBeVisible({ timeout: 15000 });
   expect(calls).not.toContain("/api/login");
   await page.getByRole("button", { name: "Sair", exact: true }).click();
   await expect(

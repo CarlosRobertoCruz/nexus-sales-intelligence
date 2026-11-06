@@ -10,5 +10,5 @@ export const RENEWALS_COPY = {
   plansTitle: "Planos renovados",
   plansDescription: "Concentração das renovações por produto.",
   recentTitle: "Renovações recentes",
-  recentDescription: "Últimas renovações concluídas ou em validação no arquivo importado.",
+  recentDescription: "Últimas renovações concluídas ou pendentes no arquivo importado.",
 } as const;

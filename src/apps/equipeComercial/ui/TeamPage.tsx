@@ -30,7 +30,7 @@ export function TeamPage({ snapshot, periodSelector }: { snapshot?: TeamSnapshot
         <section className="kpi-grid" aria-label="Indicadores da equipe comercial">
           <KpiCard label="Produção total" value={vm.summary.production} subLabel="vendas + renovações" icon={<SparklesIcon />} iconColor={TOKENS.color.chart.seriesPrimary} iconBg={TOKENS.color.brand.soft} />
           <KpiCard label="Vendas" value={vm.summary.sales} subLabel="realizadas no período" icon={<SalesChartIcon />} iconColor={TOKENS.color.feedback.info} iconBg={TOKENS.color.feedback.infoSoft} />
-          <KpiCard label="Renovações" value={vm.summary.renewals} subLabel="concluídas no período" icon={<CheckCheckIcon />} iconColor={TOKENS.color.feedback.success} iconBg={TOKENS.color.feedback.successSoft} />
+          <KpiCard label="Renovações" value={vm.summary.renewals} subLabel="concluídas e pendentes" icon={<CheckCheckIcon />} iconColor={TOKENS.color.feedback.success} iconBg={TOKENS.color.feedback.successSoft} />
           <KpiCard label="Equipe ativa" value={vm.summary.activeMembers} subLabel={`média de ${vm.summary.average} por consultora`} icon={<UsersIcon />} iconColor={TOKENS.color.feedback.warning} iconBg={TOKENS.color.feedback.warningSoft} />
         </section>
 

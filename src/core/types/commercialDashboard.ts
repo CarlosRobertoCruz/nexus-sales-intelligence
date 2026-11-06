@@ -23,7 +23,7 @@ export type CommercialDataMeta = {
 
 export type SalesPlanId = "combo-plus" | "combo-total-plus" | "combo-view" | "combo-ultra" | "power-plus" | "ultra-power" | "other";
 export type SalesPlanMetric = { id: SalesPlanId; current: number; previous: number };
-export type SellerId = "beatriz" | "karini" | "giovanna" | "sara" | "unknown";
+export type SellerId = "beatriz" | "karini" | "giovanna" | "sara" | "luana" | "unknown";
 export type MonthlySales = { month: string; currentYear: number; previousYear: number };
 export type PlanSales = { label: string; current: number; previous: number };
 export type SellerSales = { id: SellerId; name: string; current: number; previous: number };
@@ -53,7 +53,7 @@ export type RenewalBenefitId = "bonus-speed" | "none" | "double-speed" | "upgrad
 export type MonthlyRenewals = { month: string; currentYear: number; previousYear: number };
 export type BenefitRenewals = { id: RenewalBenefitId; label: string; count: number };
 export type PlanRenewals = { label: string; count: number };
-export type RecentRenewal = { id: string; date: string; customer: string; plan: string; benefit: string; seller: string; status: "Concluída" | "Em validação" };
+export type RecentRenewal = { id: string; date: string; customer: string; plan: string; benefit: string; seller: string; status: "Concluída" | "Pendente" | "Em validação" };
 
 export type RenewalsSnapshot = {
   sourceLabel: string;
