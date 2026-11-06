@@ -1,4 +1,5 @@
 import type { TeamSnapshot } from "../types/team";
+import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
 
 export function getEmptyTeamSnapshot(): TeamSnapshot {
   return {
@@ -7,11 +8,6 @@ export function getEmptyTeamSnapshot(): TeamSnapshot {
     previousPeriodLabel: "Sem período anterior",
     referenceMonth: "Nenhum período",
     updatedAt: "aguardando planilhas",
-    members: [
-      { id: "beatriz", name: "Beatriz", sales: 0, previousSales: 0, renewals: 0, previousRenewals: 0 },
-      { id: "karini", name: "Karini", sales: 0, previousSales: 0, renewals: 0, previousRenewals: 0 },
-      { id: "giovanna", name: "Giovanna", sales: 0, previousSales: 0, renewals: 0, previousRenewals: 0 },
-      { id: "sara", name: "Sara", sales: 0, previousSales: 0, renewals: 0, previousRenewals: 0 },
-    ],
+    members: COMMERCIAL_SELLERS.map(({ id, name }) => ({ id, name, sales: 0, previousSales: 0, renewals: 0, previousRenewals: 0 })),
   };
 }

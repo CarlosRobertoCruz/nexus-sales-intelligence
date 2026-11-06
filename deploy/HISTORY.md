@@ -344,3 +344,37 @@ Depois do merge e deploy, reconstruir **API e web**, pois a classificação é c
 ## Vendas com atendimentos de outro mês
 
 As três OS de instalação concluídas em outubro cujos atendimentos não estavam publicados exigem recuperação pontual do vínculo anterior. O procedimento preparado está em [INSTALLATION_CONTEXT.md](INSTALLATION_CONTEXT.md). Ele captura somente os três protocolos identificados no snapshot, valida identidade/cliente/data/autor/tipo e os publica como contexto restrito das OS, sem inflar atendimentos de outubro nem exibir setembro como um mês parcial. A coleta histórica e a reconciliação aprovadas não são reiniciadas. Testes usam respostas simuladas; a captura e a aplicação reais continuam dependendo da execução explícita na VPS após o deploy.
+
+## Cancelamentos por tipo e status do atendimento (06/11/2026)
+
+O indicador exige tipo exato `CANCELAMENTO` e status `Resolvido`, com normalização de acentos, caixa e espaços, além de um desfecho comprovado conforme o refinamento abaixo. A data comercial é o cadastro do atendimento. Uma descrição que mencione cancelamento ou uma OS de retirada finalizada não transforma atendimentos de retirada, retirada Roku, desconto, suspensão ou SAC em cancelamento. Status pendente, em andamento, `Finalizado` ou ausente não equivale a `Resolvido` nesta regra. Registros incompletos e rascunhos abandonados continuam excluídos dos indicadores.
+
+A consulta da VPS fornecida pelo usuário mostrou 22 protocolos do tipo `CANCELAMENTO`: 19 resolvidos e 3 pendentes. A regra antiga contou somente 15 dos 19 resolvidos e acrescentou 10 atendimentos de outros tipos: 5 `RETIRADA`, 3 `RETIRADA ROKU`, 1 `SOLICITAÇÃO DE DESCONTO` e 1 `SUSPENSÃO TEMPORÁRIA`, totalizando 25. O filtro somente por tipo/status selecionaria 19 candidatos, mas a revisão individual abaixo mostrou que três deles não têm cancelamento concluído. Não alterar o snapshot nem forçar o resultado para 20.
+
+Depois de commit, push, validação verde e merge, reconstruir **API e web**, pois o classificador é compartilhado. Não exige migração ou nova coleta. Reaplicar aos dados publicados com `dc run --rm --no-deps history rebuild-metrics`, que recalcula em transação e não consulta a Hubsoft. Conferir os indicadores no painel. Esse recálculo não atualiza o status dos atendimentos na origem; para reconciliar 19 versus 20, comparar os três protocolos pendentes salvos com o relatório atual antes de preparar qualquer atualização pontual.
+
+### Revisão individual posterior: tipo e status ainda não bastam
+
+O relatório de atendimentos exportado em 06/11/2026 (SHA-256 `d5538c15e06c37670a48a6510bc2e2758f3c59cdfa831dab0e0ffe7b609abd41`) contém 22 protocolos únicos, 20 resolvidos e 2 pendentes; a última linha do XLSX é um rodapé, não um atendimento. A comparação com a exportação de 03/11 confirmou um atendimento que estava pendente e foi encerrado em 04/11. Isso explica a diferença entre 19 resolvidos no snapshot antigo e 20 no relatório atual.
+
+A leitura individual encontrou dois atendimentos resolvidos cujo cancelamento foi revertido em favor de migração e um terceiro encerrado por falta de comunicação, com cancelamento explicitamente ainda pendente. Esses três não comprovam perda de contrato. Portanto, tipo/status é somente o primeiro filtro; o classificador também verifica o desfecho.
+
+Dos demais casos, 16 têm referência de OS de retirada que confere por número com uma retirada finalizada no relatório de conclusões de outubro. O atendimento encerrado em 04/11 referencia outra OS, ausente do relatório de conclusões de outubro; ele é um candidato adicional pelo critério de cadastro do atendimento em outubro, mas sua conclusão não deve ser atribuída a outubro. Resultado da revisão: 16 com retirada corroborada em outubro, 1 candidato encerrado em novembro e 5 fora do indicador por reversão ou pendência. Não gravar exceções por nome/protocolo nem transformar esse resultado em ajuste numérico. A revisão é offline e não atualizou fonte, cache ou indicadores na VPS.
+
+O classificador prioriza a descrição de fechamento, usando a abertura apenas quando não há fechamento. Reversão/desistência explícita ou cancelamento ainda pendente impedem a inclusão. Informações conflitantes e conclusão sem comprovação exigem revisão, com aviso agregado, mantendo a origem e o volume. Uma afirmação explícita de conclusão pode comprovar cancelamento sem OS. Na ausência dela, a evidência por OS exige tipo exato `RETIRADA`, status `Finalizado`, início/término executados válidos e conclusão não anterior ao cadastro do atendimento. O vínculo deve ser pelo ID nativo do atendimento ou pelo número de OS explicitamente referenciado no desfecho; divergências de cliente ou atendimento são recusadas. Não usar fallback genérico por nome, cliente ou ticket nem `RETIRADA ROKU` como prova de cancelamento do contrato.
+
+A reprodução offline dos 22 protocolos com as OS disponíveis confirmou 16 inclusões, duas reversões e um encerramento ainda pendente no snapshot antigo. Com o relatório novo, o atendimento adicional resolvido permanece em revisão porque sua OS de novembro não está nessa base. O replay atribui o tipo do filtro somente em memória, pois a exportação não inclui essa coluna. Nenhuma fonte é modificada. Validar o caso de novembro separadamente antes de atualizar dados publicados.
+
+## Luana e histórico da equipe comercial (06/11/2026)
+
+Luana Mota de Souza foi adicionada com o identificador `luana` ao cadastro compartilhado de consultoras usado na classificação, nas vendas e na equipe comercial. As grafias Giovana e Giovanna continuam associadas ao identificador histórico `giovanna`; os IDs e resultados anteriores são preservados. A saída da empresa não elimina a atribuição dos meses anteriores. Não há redistribuição de resultados para Luana nem data de admissão/desligamento inventada. Ela aparece sem produção nos meses sem registros atribuídos. Esse cadastro de consultora não cria conta de acesso nem credenciais.
+
+O mesmo deploy de API e web e o recálculo dos indicadores reaplicam o reconhecimento das consultoras aos registros existentes, sem consultar a Hubsoft. Dados ainda não coletados precisam chegar em uma atualização posterior; cadastrar o nome não gera registros novos.
+
+## Nova orientação para renovações pendentes (06/11/2026)
+
+O usuário informou nova determinação da gestão: incluir também status `Pendente` nos dois tipos elegíveis (`RENOVAÇÃO DE CONTRATO` e `ALTERAÇÃO DE PLANO`). Essa decisão substitui a exclusão de pendentes registrada na seção de 05/11. `Resolvido` e o legado `Finalizado` continuam aceitos; em andamento, status ausente, não realizadas, rascunhos e registros incompletos continuam fora da classificação automática. Não estender essa permissão de pendência aos cancelamentos.
+
+A pendente mantém `completed=false` na origem derivada e aparece como `Pendente` na lista. Resumo, série mensal, planos, benefícios, equipe e localidades contam todos os eventos de renovação elegíveis, sem filtrar somente os concluídos. Deduplicação por protocolo permanece: resolver uma pendente muda seu status, sem criar um segundo evento. O relatório conferido contém 184 concluídas e 1 pendente, portanto o esperado para outubro passa a 185 após o recálculo com a nova regra, sem constante ou ajuste manual de contagem.
+
+O deploy continua exigindo API e web e o recálculo transacional dos indicadores. A inclusão da pendente não exige consulta à Hubsoft se o registro já está publicado. Os registros históricos e os avisos de pendência são preservados.

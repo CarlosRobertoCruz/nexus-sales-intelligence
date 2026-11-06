@@ -65,23 +65,37 @@ test('reimportar o mesmo atendimento ou protocolo não duplica renovações',()=
   assert.equal(result.renewals[0].id,first.protocolo);
 });
 
-test('renovação e alteração de plano pendentes permanecem na origem e só contam após resolução',()=>{
+test('renovação e alteração de plano pendentes contam sem receber status de conclusão',()=>{
   for(const type of ['RENOVAÇÃO DE CONTRATO','ALTERAÇÃO DE PLANO']) {
     const pending={...attendanceFixture,tipo_atendimento:type,status:'Pendente',descricao_abertura:'Ticket: #654 Alteração aceita, aguardando resolução'};
-    for(const status of ['Pendente',' pendente ','Em andamento','Aguardando Análise','']) {
+    for(const status of ['Em andamento','Aguardando Análise','']) {
       const result=classifyCommercialRows(worksheet([{...pending,status}]),worksheet([orderFixture]));
-      assert.equal(result.renewals.length,0,`${type}: ${status} não é resolução`);
+      assert.equal(result.renewals.length,0,`${type}: ${status} não é um status incluído pela gestão`);
       assert.equal(result.attendance.length,1,'atendimento permanece no volume e na origem');
+    }
+    for(const status of ['Pendente',' pendente ']) {
+      const result=classifyCommercialRows(worksheet([{...pending,status}]),worksheet([orderFixture]));
+      assert.equal(result.renewals.length,1);assert.equal(result.renewals[0].completed,false);
     }
     for(const status of ['Resolvido',' resolvido ','Finalizado']) {
       const resolved={...pending,status};
       assert.equal(classifyCommercialRows(worksheet([resolved]),worksheet([orderFixture])).renewals.length,1);
+      assert.equal(classifyCommercialRows(worksheet([resolved]),worksheet([orderFixture])).renewals[0].completed,true);
       const other={...resolved,id_atendimento:'102',protocolo:'202610010002'};
       const result=classifyCommercialRows(worksheet([pending,other]),worksheet([orderFixture]));
-      assert.equal(result.renewals.length,1);
-      assert.equal(result.renewals[0].id,other.protocolo,'pendente não substitui o protocolo resolvido na deduplicação');
+      assert.equal(result.renewals.length,2,'protocolos distintos contam mesmo com um pendente');
+      assert.equal(classifyCommercialRows(worksheet([pending,resolved]),worksheet([orderFixture])).renewals.length,1,'resolver o mesmo protocolo não duplica o evento');
     }
   }
+});
+
+test('184 renovações concluídas e uma pendente totalizam 185 sem incluir não realizadas',()=>{
+  const rows=Array.from({length:185},(_,i)=>({...attendanceFixture,id_atendimento:String(1000+i),protocolo:`20261001${1000+i}`,
+    tipo_atendimento:i<172?'RENOVAÇÃO DE CONTRATO':'ALTERAÇÃO DE PLANO',status:i===184?'Pendente':'Resolvido'}));
+  const rejected={...rows[0],id_atendimento:'9999',protocolo:'202610019999',tipo_atendimento:'ALTERAÇÃO DE PLANO NÃO REALIZADO'};
+  const r=classifyCommercialRows(worksheet([...rows,rows[184],rejected]),worksheet([orderFixture]));
+  assert.equal(r.renewals.length,185);assert.equal(r.renewals.filter(row=>row.completed).length,184);
+  assert.equal(r.renewals.filter(row=>!row.completed).length,1);
 });
 
 test('checklists não viram instalações, reativações ou prova de retirada, mas permanecem no volume bruto',()=>{
@@ -95,13 +109,53 @@ test('checklists não viram instalações, reativações ou prova de retirada, m
   }
 });
 
-test('somente cancelamento efetivado entra no indicador',()=>{
+test('cancelamento concluído exige o tipo exato e status resolvido',()=>{
   const requested={...attendanceFixture,id_atendimento:'102',protocolo:'202610010002',tipo_atendimento:'SOLICITAÇÃO DE CANCELAMENTO/NÃO REALIZADO',descricao_abertura:'Cliente pediu informações sobre cancelamento.'};
-  const completed={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'CANCELAMENTO',descricao_abertura:'O cancelamento foi realizado com sucesso.'};
+  const completed={...attendanceFixture,id_atendimento:'103',protocolo:'202610010003',tipo_atendimento:'CANCELAMENTO',status:'Resolvido',descricao_abertura:'Encerramento contratual.',descricao_fechamento:'Cancelamento efetivado.'};
   const result=classifyCommercialRows(worksheet([requested,completed]),worksheet([orderFixture]));
   assert.equal(result.cancellations.length,1);
   assert.equal(result.cancellations[0].id,completed.protocolo);
   assert.equal(result.cancellations[0].completed,true);
+  for(const type of ['CANCELAMENTO',' cancelamento ']) {
+    const result=classifyCommercialRows(worksheet([{...completed,tipo_atendimento:type,status:' resolvido '}]),worksheet([orderFixture]));
+    assert.equal(result.cancellations.length,1);
+    assert.equal(result.cancellations[0].date.getDate(),1,'data comercial continua sendo o cadastro do atendimento');
+  }
+  for(const status of ['Pendente','Em andamento','Aguardando Análise','Finalizado','']) {
+    const result=classifyCommercialRows(worksheet([{...completed,status,descricao_abertura:'O contrato foi cancelado e a retirada foi agendada.'}]),
+      worksheet([{...orderFixture,id_atendimento:completed.id_atendimento,tipo_ordem_servico:'RETIRADA',status:'Finalizado'}]));
+    assert.equal(result.cancellations.length,0,`${status} não é atendimento resolvido, mesmo com retirada finalizada`);
+    assert.equal(result.attendanceRows,1,'registro permanece no volume de atendimentos');
+  }
+  for(const tipo_atendimento of ['RETIRADA','RETIRADA ROKU','SOLICITAÇÃO DE DESCONTO','SUSPENSÃO TEMPORÁRIA','SAC','CANCELAMENTO NÃO REALIZADO']) {
+    const result=classifyCommercialRows(worksheet([{...completed,tipo_atendimento,descricao_abertura:'O cancelamento foi realizado com sucesso.'}]),
+      worksheet([{...orderFixture,id_atendimento:completed.id_atendimento,tipo_ordem_servico:'RETIRADA',status:'Finalizado'}]));
+    assert.equal(result.cancellations.length,0,`${tipo_atendimento} não vira cancelamento pelo texto ou pela OS`);
+  }
+  for(const classification_status of ['incomplete','discarded_draft']) {
+    assert.equal(classifyCommercialRows(worksheet([attendanceFixture,{...completed,classification_status}]),worksheet([orderFixture])).cancellations.length,0);
+  }
+  assert.equal(classifyCommercialRows(worksheet([completed,{...completed,descricao_abertura:'Texto atualizado'}]),worksheet([orderFixture])).cancellations.length,1);
+});
+
+test('distribuição de outubro preserva 19 candidatos, mas conta somente 16 com desfecho confirmado',()=>{
+  let nextId=1000;
+  const add=(type,status,description)=>({...attendanceFixture,id_atendimento:String(++nextId),protocolo:`20261001${nextId}`,
+    tipo_atendimento:type,status,descricao_abertura:description});
+  const confirmed=Array.from({length:16},()=>add('CANCELAMENTO','Resolvido','O cancelamento foi realizado.'));
+  const reversed=[
+    {...add('CANCELAMENTO','Resolvido','Solicitou cancelamento.'),descricao_fechamento:'O cancelamento inicialmente solicitado não foi realizado. Optou pela migração.'},
+    {...add('CANCELAMENTO','Resolvido','Solicitou cancelamento.'),descricao_fechamento:'Desistiu da solicitação de cancelamento. A solicitação de cancelamento foi revertida, mantendo o contrato ativo.'},
+    {...add('CANCELAMENTO','Resolvido','Solicitou cancelamento.'),descricao_fechamento:'Atendimento finalizado por falta de comunicação. O cancelamento permanece pendente de conclusão.'},
+  ];
+  const pending=Array.from({length:3},()=>add('CANCELAMENTO','Pendente','Aguardando análise da solicitação.'));
+  const others=[...Array(5).fill('RETIRADA'),...Array(3).fill('RETIRADA ROKU'),'SOLICITAÇÃO DE DESCONTO','SUSPENSÃO TEMPORÁRIA']
+    .map(type=>add(type,'Resolvido','O contrato foi cancelado.'));
+  const result=classifyCommercialRows(worksheet([...confirmed,...reversed,...pending,...others]),worksheet([orderFixture]));
+  assert.deepEqual(result.cancellations.map(row=>row.id),confirmed.map(row=>row.protocolo));
+  assert.equal(result.attendanceRows,32,'todos os atendimentos permanecem na base, sem forçar a contagem para 20');
+  assert.ok(result.warnings.some(w=>w.startsWith('2 atendimento(s) de cancelamento resolvido(s) com desistência')));
+  assert.ok(result.warnings.some(w=>w.startsWith('1 atendimento(s) de cancelamento resolvido(s) descrevem')));
 });
 
 test('checklist não encobre OS comercial válida do mesmo atendimento',()=>{

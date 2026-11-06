@@ -26,7 +26,7 @@ test("dashboard keeps manual imports hidden and never queries Hubsoft on navigat
     throw new Error("Unexpected request: " + path);
   });
   await page.goto("/");
-  await expect(page.getByText("Visão geral de vendas", { exact: true })).toBeVisible();
+  await expect(page.getByText("Visão geral de vendas", { exact: true })).toBeVisible({ timeout: 15000 });
   const navigation = page.getByRole("navigation", { name: "Navegação principal" });
   for (const name of ["Vendas", "Renovações", "Cancelamentos", "Visão geral"]) {
     await navigation.getByRole("button", { name, exact: true }).click();

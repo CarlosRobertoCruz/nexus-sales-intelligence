@@ -1,5 +1,6 @@
 import type { CancellationReasonId, CommercialDashboardBundle, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCommercialImport } from "../types/spreadsheetImport";
+import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
 
 const PLAN_ORDER: ReadonlyArray<{ id: SalesPlanId; label: string }> = [
   { id: "combo-plus", label: "600 Mega Combo Plus" },
@@ -11,12 +12,7 @@ const PLAN_ORDER: ReadonlyArray<{ id: SalesPlanId; label: string }> = [
   { id: "other", label: "Outros planos" },
 ];
 
-const SELLER_ORDER: ReadonlyArray<{ id: SellerId; name: string }> = [
-  { id: "beatriz", name: "Beatriz" },
-  { id: "karini", name: "Karini" },
-  { id: "giovanna", name: "Giovanna" },
-  { id: "sara", name: "Sara" },
-];
+const SELLER_ORDER = COMMERCIAL_SELLERS;
 
 const BENEFIT_ORDER: ReadonlyArray<{ id: RenewalBenefitId; label: string }> = [
   { id: "bonus-speed", label: "Bônus de velocidade" },
@@ -84,7 +80,7 @@ function previousLocation(previous: CommercialDashboardBundle | null, location: 
 
 function sellerIdFromName(name: string): SellerId | null {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  return SELLER_ORDER.find((seller) => normalized.includes(seller.name.toLowerCase()))?.id ?? null;
+  return SELLER_ORDER.find((seller) => seller.pattern.test(normalized))?.id ?? null;
 }
 
 export function buildCommercialDashboard(classified: ClassifiedCommercialImport, previous: CommercialDashboardBundle | null, now = new Date()): CommercialDashboardBundle {
@@ -94,14 +90,14 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
   const previousPeriodLabel = validPrevious?.meta.referenceMonth ?? "Sem período anterior";
   const updatedAt = formatUpdatedAt(now);
   const sourceLabel = "Dados importados";
-  const completedRenewals = classified.renewals.filter((renewal) => renewal.completed);
+  const countedRenewals = classified.renewals;
   const completedCancellations = classified.cancellations.filter((cancellation) => cancellation.completed);
 
   const salesByPlan = countBy(classified.sales, (sale) => sale.planId);
   const salesBySeller = countBy(classified.sales, (sale) => sale.sellerId);
-  const renewalsByBenefit = countBy(completedRenewals, (renewal) => renewal.benefitId);
-  const renewalsByPlan = countBy(completedRenewals, (renewal) => renewal.planLabel);
-  const renewalsBySeller = countBy(completedRenewals, (renewal) => sellerIdFromName(renewal.sellerName) ?? "unknown");
+  const renewalsByBenefit = countBy(countedRenewals, (renewal) => renewal.benefitId);
+  const renewalsByPlan = countBy(countedRenewals, (renewal) => renewal.planLabel);
+  const renewalsBySeller = countBy(countedRenewals, (renewal) => sellerIdFromName(renewal.sellerName) ?? "unknown");
   const cancellationsByReason = countBy(completedCancellations, (cancellation) => cancellation.reasonId);
   const cancellationsByLocation = countBy(completedCancellations, (cancellation) => cancellation.location);
 
@@ -162,7 +158,7 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
       referenceMonth,
       updatedAt,
       sales: overviewSales,
-      renewals: { current: completedRenewals.length, previous: previousRenewalsTotal },
+      renewals: { current: countedRenewals.length, previous: previousRenewalsTotal },
       cancellations: { current: completedCancellations.length, previous: previousCancellationsTotal },
       reactivations: { current: classified.reactivations.length, previous: validPrevious?.overview.reactivations.current ?? 0 },
     },
@@ -189,7 +185,7 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
       ...comparison,
       referenceMonth,
       updatedAt,
-      monthly: [{ month: currentMonth, currentYear: completedRenewals.length, previousYear: previousRenewalsTotal }],
+      monthly: [{ month: currentMonth, currentYear: countedRenewals.length, previousYear: previousRenewalsTotal }],
       benefits,
       plans,
       recentRenewals: [...classified.renewals].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 5).map((renewal) => ({
@@ -199,7 +195,7 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
         plan: renewal.planLabel,
         benefit: renewal.benefitLabel,
         seller: renewal.sellerName,
-        status: renewal.completed ? "Concluída" : "Em validação",
+        status: renewal.completed ? "Concluída" : "Pendente",
       })),
     },
     cancellations: {

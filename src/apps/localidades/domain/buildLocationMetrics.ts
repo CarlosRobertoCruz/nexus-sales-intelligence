@@ -20,7 +20,7 @@ export function buildLocationMetrics(ledger: CommercialDataLedger, periodKey: st
   };
 
   for (const sale of ledger.sales.filter((event) => inMonth(event.date, periodKey))) getMetric(sale.location).sales += 1;
-  for (const renewal of ledger.renewals.filter((event) => event.completed && inMonth(event.date, periodKey))) getMetric(renewal.location).renewals += 1;
+  for (const renewal of ledger.renewals.filter((event) => inMonth(event.date, periodKey))) getMetric(renewal.location).renewals += 1;
   for (const cancellation of ledger.cancellations.filter((event) => event.completed && inMonth(event.date, periodKey))) getMetric(cancellation.location).cancellations += 1;
 
   return [...metrics.values()].filter((metric) => metric.sales + metric.renewals + metric.cancellations > 0);
