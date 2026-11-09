@@ -21,7 +21,7 @@ export type CommercialDataMeta = {
   quality: ImportQuality;
 };
 
-export type SalesPlanId = "combo-plus" | "combo-total-plus" | "combo-view" | "combo-ultra" | "power-plus" | "ultra-power" | "other";
+export type SalesPlanId = "combo-plus" | "combo-total-plus" | "combo-view" | "combo-ultra" | "power-plus" | "ultra-power" | "nexus-essential" | "nexus-pro" | "nexus-family" | "nexus-gamer" | "ultra-internet" | "900-apps" | "other";
 export type SalesPlanMetric = { id: SalesPlanId; current: number; previous: number };
 export type SellerId = "beatriz" | "karini" | "giovanna" | "sara" | "luana" | "unknown";
 export type MonthlySales = { month: string; currentYear: number; previousYear: number };
@@ -73,6 +73,32 @@ export type CancellationReason = { id: CancellationReasonId; label: string; coun
 export type LocationCancellations = { location: string; current: number; previous: number };
 export type RecentCancellation = { id: string; date: string; customer: string; reason: string; plan: string; location: string; status: "Concluído" | "Em análise" };
 
+export type CancellationOrderDetail = {
+  id: string;
+  number: string;
+  type: string;
+  status: string;
+  openedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  openingReport: string;
+  serviceReport: string;
+  closingReport: string;
+  linkedToCancellation: boolean;
+};
+export type CancellationDetail = {
+  id: string;
+  date: string;
+  customer: string;
+  plan: string;
+  location: string;
+  reasonId: CancellationReasonId;
+  openingReport: string;
+  closingReport: string;
+  orders: ReadonlyArray<CancellationOrderDetail>;
+  availableOrders: number;
+};
+
 export type CancellationsSnapshot = {
   sourceLabel: string;
   currentPeriodLabel: string;
@@ -83,6 +109,7 @@ export type CancellationsSnapshot = {
   reasons: ReadonlyArray<CancellationReason>;
   locations: ReadonlyArray<LocationCancellations>;
   recentCancellations: ReadonlyArray<RecentCancellation>;
+  details?: ReadonlyArray<CancellationDetail>;
 };
 
 export type SalesOverviewSnapshot = {

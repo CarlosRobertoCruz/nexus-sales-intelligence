@@ -1,5 +1,6 @@
 // Textos próprios da visão geral; mantém linguagem comercial fora da UI.
 import type { SalesPlanId } from "../types/salesOverview";
+import { COMMERCIAL_PLANS } from "../../../core/config/commercialPlans";
 
 export const SALES_OVERVIEW_COPY = {
   product: "Nexus Sales Intelligence",
@@ -21,12 +22,4 @@ export const SALES_OVERVIEW_COPY = {
   nav: ["Visão geral", "Vendas", "Renovações", "Cancelamentos", "Localidades", "Equipe comercial"],
 } as const;
 
-export const SALES_PLAN_LABELS: Record<SalesPlanId, { short: string; full: string }> = {
-  "combo-plus": { short: "Combo Plus", full: "600 Mega Combo Plus" },
-  "combo-total-plus": { short: "Total Plus", full: "600 Mega Combo Total Plus" },
-  "combo-view": { short: "Combo View", full: "600 Mega Combo View" },
-  "combo-ultra": { short: "Combo Ultra", full: "720 Mega Combo Ultra" },
-  "power-plus": { short: "Power Plus", full: "900 Mega Power Plus" },
-  "ultra-power": { short: "Ultra Power", full: "1 Giga Ultra Power" },
-  "other": { short: "Outros", full: "Outros planos" },
-};
+export const SALES_PLAN_LABELS = Object.fromEntries(COMMERCIAL_PLANS.map(plan => [plan.id, { short: plan.short, full: plan.label }])) as Record<SalesPlanId, { short: string; full: string }>;

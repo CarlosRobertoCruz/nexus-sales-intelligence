@@ -1,0 +1,27 @@
+.cancellation-reasons-opener { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; border-radius: 16px; }
+.cancellation-reasons-opener:hover { outline: 1px solid #7962c8; }
+.cancellation-reasons-opener:focus-visible, .cancellation-reason-filters button:focus-visible, .cancellation-detail-close:focus-visible, .cancellation-case summary:focus-visible { outline: 3px solid #ac96ff; outline-offset: 3px; }
+.cancellation-reason-preview { display: grid; gap: 12px; min-width: 0; }
+.cancellation-reason-preview > div { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.cancellation-reason-preview > div > span:nth-child(2) { flex: 1; }
+.cancellation-reason-preview small { display: block; color: #aba4c0; margin-top: 3px; }
+.cancellation-detail-summary { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: center; padding-block: 12px 24px; }
+.cancellation-reason-filters { display: grid; gap: 8px; }
+.cancellation-reason-filters button, .cancellation-detail-close { display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 44px; color: #f3f0fc; background: #171426; border: 1px solid #39304f; border-radius: 10px; cursor: pointer; text-align: left; }
+.cancellation-reason-filters button > span:nth-child(2) { flex: 1; }
+.cancellation-reason-filters button strong { font-size: 12px; }
+.cancellation-reason-filters button[aria-pressed="true"] { background: #302354; border-color: #a18aff; }
+.cancellation-detail-close { background: #6544d5; }
+.cancellation-case { border: 1px solid #39304f; border-radius: 12px; margin-block: 12px; overflow: hidden; background: #171426; }
+.cancellation-case summary { display: flex; gap: 16px; justify-content: space-between; align-items: center; padding: 18px; cursor: pointer; font-size: 13px; }
+.cancellation-case summary > span:last-child { font-size: 11px; color: #c3b2ff; flex-shrink: 0; }
+.cancellation-case summary small { display: block; margin-top: 6px; color: #aba4c0; overflow-wrap: anywhere; }
+.cancellation-case-body { padding: 0 18px 18px; }
+.cancellation-case-body h4, .cancellation-report h4 { margin-block: 12px 8px; font-size: 13px; }
+.cancellation-report p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; font-size: 13px; color: #ddd6ed; margin-block: 0 18px; }
+.cancellation-order { padding: 16px; margin-block: 12px; border: 1px solid #39304f; border-radius: 10px; background: #100d1d; }
+.cancellation-order header { display: flex; flex-wrap: wrap; gap: 8px 16px; justify-content: space-between; font-size: 12px; }
+.cancellation-order dl { display: flex; flex-wrap: wrap; gap: 16px; font-size: 11px; color: #aba4c0; }
+.cancellation-order dd { margin: 4px 0 0; color: #ddd6ed; }
+.cancellation-detail-note { color: #aba4c0; font-size: 12px; line-height: 1.7; }
+@media (max-width: 700px) { .cancellation-detail-summary { grid-template-columns: 1fr; justify-items: center; } .cancellation-reason-filters { width: 100%; } .cancellation-case summary { flex-direction: column; align-items: flex-start; } }

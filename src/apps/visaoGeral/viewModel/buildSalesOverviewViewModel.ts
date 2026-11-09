@@ -15,6 +15,7 @@ export function buildSalesOverviewViewModel(snapshot: SalesOverviewSnapshot) {
   const previousSales = sumPreviousSales(snapshot);
   const leadingPlan = [...snapshot.sales].sort((a, b) => b.current - a.current)[0];
   const salesGrowth = calculateGrowth(totalSales, previousSales);
+  const visiblePlans = snapshot.sales.filter(plan => plan.current > 0 || plan.previous > 0);
 
   return {
     sourceLabel: snapshot.sourceLabel,
@@ -26,7 +27,7 @@ export function buildSalesOverviewViewModel(snapshot: SalesOverviewSnapshot) {
       cancellations: { value: formatPtBrInteger(snapshot.cancellations.current), trend: formatGrowth(calculateGrowth(snapshot.cancellations.current, snapshot.cancellations.previous)) },
       reactivations: { value: formatPtBrInteger(snapshot.reactivations.current), trend: formatGrowth(calculateGrowth(snapshot.reactivations.current, snapshot.reactivations.previous)) },
     },
-    plans: snapshot.sales.map((plan) => ({
+    plans: (visiblePlans.length ? visiblePlans : snapshot.sales).map((plan) => ({
       id: plan.id,
       label: SALES_PLAN_LABELS[plan.id].short,
       fullLabel: SALES_PLAN_LABELS[plan.id].full,

@@ -1,5 +1,15 @@
 # Carga histórica Hubsoft de 2026
 
+## Detalhamento do BI e catálogo de planos
+
+O catálogo compartilhado reconhece Nexus Essencial, Nexus Pro, Nexus Family, Nexus Gamer e Ultra somente internet, mantendo os produtos antigos separados. A combinação documentada de 900 Mega + aplicativo Standard + Premium recebe um rótulo descritivo com nome comercial não informado; velocidade isolada não identifica um produto. Gráficos e tabelas usam o mesmo catálogo. A visão geral oculta apenas categorias sem movimento no período atual e anterior.
+
+O cartão de motivos de cancelamento abre um modal com filtros para todos os motivos, incluindo Outros. Cada atendimento mostra abertura, fechamento e as cinco OS mais recentes disponíveis na base local, por código de cliente ou vínculo exato de atendimento/OS. Não cruza clientes apenas pelo nome. Checklists não são usados. O histórico considera OS registradas até o atendimento/fechamento e as diretamente vinculadas, inclusive concluídas depois. Datas ausentes e histórico parcial ficam explícitos; abrir o modal não consulta a Hubsoft. Linhas identificadas como credenciais são omitidas da cópia de leitura; a origem fica preservada. As regras de inclusão dos indicadores permanecem iguais.
+
+A concentração da equipe usa uma cor estável por colaboradora, com legenda de quantidade e porcentagem, preservando o cálculo de vendas + renovações.
+
+Após merge e build de **api e web**, recrie ambos. Execute `dc run --rm --no-deps history rebuild-metrics` para reconhecer os planos e preparar os detalhes a partir de `source_records`. Não requer migração nem nova carga Hubsoft. O navegador deve recarregar os dados após o recálculo. Registros antigos sem detalhe exibem ausência de dados em vez de inventar relatos.
+
 Implementação preparada para testes locais. **Piloto escolhido: 01/10/2026, após análise dos relatórios exportados em 29/10. Veja [a análise e as pendências do piloto](PILOT_OCTOBER_2026.md). Não iniciar a carga real sem os relatórios, o corte do acompanhamento e a coordenação dos consumidores do IP.** Não depende de autorização adicional de administrador Hubsoft; depende das permissões técnicas das credenciais existentes.
 
 ## Antes de publicar

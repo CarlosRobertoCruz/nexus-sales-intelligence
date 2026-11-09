@@ -5,7 +5,7 @@ export const TEAM_COPY = {
   performanceTitle: "Desempenho por consultora",
   performanceDescription: "Produção combinada de vendas e renovações, incluindo as pendentes do período.",
   concentrationTitle: "Concentração da produção",
-  concentrationDescription: "Participação da consultora líder no resultado da equipe.",
+  concentrationDescription: "Participação de cada consultora no resultado da equipe.",
   tableTitle: "Detalhamento da equipe",
   tableDescription: "Leitura comparativa para orientar acompanhamento e distribuição de oportunidades.",
 } as const;

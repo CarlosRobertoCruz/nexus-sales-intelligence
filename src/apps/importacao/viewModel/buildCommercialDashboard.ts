@@ -1,16 +1,9 @@
 import type { CancellationReasonId, CommercialDashboardBundle, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCommercialImport } from "../types/spreadsheetImport";
 import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
+import { COMMERCIAL_PLANS } from "../../../core/config/commercialPlans";
 
-const PLAN_ORDER: ReadonlyArray<{ id: SalesPlanId; label: string }> = [
-  { id: "combo-plus", label: "600 Mega Combo Plus" },
-  { id: "combo-total-plus", label: "600 Mega Combo Total Plus" },
-  { id: "combo-view", label: "600 Mega Combo View" },
-  { id: "combo-ultra", label: "720 Mega Combo Ultra" },
-  { id: "power-plus", label: "900 Mega Power Plus" },
-  { id: "ultra-power", label: "1 Giga Ultra Power" },
-  { id: "other", label: "Outros planos" },
-];
+const PLAN_ORDER = COMMERCIAL_PLANS;
 
 const SELLER_ORDER = COMMERCIAL_SELLERS;
 
@@ -120,7 +113,7 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
     };
   });
   const benefits = BENEFIT_ORDER.map((benefit) => ({ id: benefit.id, label: benefit.label, count: renewalsByBenefit.get(benefit.id) ?? 0 }));
-  const plans = [...renewalsByPlan.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count).slice(0, 6);
+  const plans = [...renewalsByPlan.entries()].map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
   if (!plans.length) plans.push({ label: "Sem dados", count: 0 });
   const reasons = REASON_ORDER.map((reason) => ({ ...reason, count: cancellationsByReason.get(reason.id) ?? 0 }));
   const locations = [...cancellationsByLocation.entries()]
@@ -215,6 +208,13 @@ export function buildCommercialDashboard(classified: ClassifiedCommercialImport,
         location: cancellation.location,
         status: cancellation.completed ? "Concluído" : "Em análise",
       })),
+      details: completedCancellations.map(cancellation => ({
+        id: cancellation.id, date: formatDate(cancellation.date), customer: cancellation.customer,
+        plan: cancellation.planLabel, location: cancellation.location, reasonId: cancellation.reasonId,
+        openingReport: cancellation.detail?.openingReport ?? "",
+        closingReport: cancellation.detail?.closingReport ?? "",
+        orders: cancellation.detail?.orders ?? [], availableOrders: cancellation.detail?.availableOrders ?? 0,
+      })).sort((a, b) => b.date.split("/").reverse().join("").localeCompare(a.date.split("/").reverse().join("")) || b.id.localeCompare(a.id)),
     },
     team: {
       sourceLabel,
