@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { MultiDonutChart } from "@/garden/charts";
-import { Modal, Stack, Surface, Text } from "@/garden/foundations";
+import { Badge, Modal, Row, Stack, Surface, Text } from "@/garden/foundations";
 import { TOKENS } from "@/garden/tokens";
 import type { CancellationDetail } from "@/core/types/commercialDashboard";
 import type { CancellationsViewModel } from "../viewModel/buildCancellationsViewModel";
 import "./cancellationDetails.css";
 
-const colors = ["#ff526a", "#ffb429", "#32c4ef", "#f472b6", "#a69bc7", "#2bd9ae", "#e5d85e", "#a18aff"];
+const reasonColors = [TOKENS.color.feedback.danger, TOKENS.color.feedback.warning, TOKENS.color.chart.info, TOKENS.color.category.accentPink, TOKENS.color.chart.neutral];
+const reasonColor = (index: number) => reasonColors[index % reasonColors.length];
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "Não informada";
 
@@ -61,7 +62,7 @@ function DetailModal({ vm, onClose }: { vm: CancellationsViewModel; onClose: () 
     style={{ maxWidth: "calc(100vw - 24px)" }} bodyStyle={{ overflowY: "auto", flex: 1, color: TOKENS.color.content.primary }}
     footer={<button type="button" className="cancellation-detail-close" onClick={onClose}>Fechar detalhes</button>}>
     <div className="cancellation-detail-summary">
-      <MultiDonutChart size={240} strokeWidth={10} segments={vm.reasons.map((reason, index) => ({ percentage: reason.share, color: colors[index] }))}
+      <MultiDonutChart size={240} strokeWidth={10} segments={vm.reasons.map((reason, index) => ({ percentage: reason.share, color: reasonColor(index) }))}
         trackColor={TOKENS.color.stroke.subtle} onSegmentSelect={index => setSelected(vm.reasons[index].id)}
         tooltip={{ heading: "Motivos de cancelamento", valueLabels: vm.reasons.map(reason => reason.label), counts: vm.reasons.map(reason => reason.count) }}>
         <Stack align="center"><Text size="value" weight={800}>{vm.summary.total}</Text><Text size="xs" tone="muted">cancelamentos</Text></Stack>
@@ -69,7 +70,7 @@ function DetailModal({ vm, onClose }: { vm: CancellationsViewModel; onClose: () 
       <div className="cancellation-reason-filters" aria-label="Selecionar motivo de cancelamento">
         <button type="button" aria-pressed={!selected} onClick={() => setSelected(null)}>Todos os motivos · {vm.summary.total}</button>
         {vm.reasons.map((reason, index) => <button type="button" key={reason.id} aria-pressed={selected === reason.id} onClick={() => setSelected(reason.id)}>
-          <span className="reason-dot" style={{ background: colors[index] }} /><span>{reason.label}</span><strong>{reason.count} · {pct(reason.share)}</strong>
+          <span className="reason-dot" style={{ background: reasonColor(index) }} /><span>{reason.label}</span><strong>{reason.count} · {pct(reason.share)}</strong>
         </button>)}
       </div>
     </div>
@@ -90,15 +91,27 @@ export function CancellationReasons({ vm }: { vm: CancellationsViewModel }) {
   const close = useRef(() => setOpen(false)).current;
   useEffect(() => setOpen(false), [vm.referenceMonth]);
   return <>
-    <button type="button" className="cancellation-reasons-opener" onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label="Ampliar motivos de cancelamento">
+    <button type="button" className="cancellation-reasons-opener" style={{ color: TOKENS.color.content.primary }} onClick={() => setOpen(true)} aria-haspopup="dialog" aria-label="Ampliar motivos de cancelamento">
       <Surface tone="subtle" padding={TOKENS.spacing[24]} style={{ border: `1px solid ${TOKENS.color.stroke.default}`, height: "100%" }}>
         <Stack gap={TOKENS.spacing[20]}>
           <Stack gap={TOKENS.spacing[4]}><Text size="xl" weight={800}>Motivos de cancelamento</Text><Text size="sm" tone="muted">Participação de cada causa no total do mês.</Text></Stack>
           <div className="cancellation-reasons-content">
-            <MultiDonutChart size={190} strokeWidth={10} trackColor={TOKENS.color.stroke.subtle} segments={vm.reasons.map((reason, index) => ({ percentage: reason.share, color: colors[index] }))}>
+            <MultiDonutChart size={190} strokeWidth={10} trackColor={TOKENS.color.stroke.subtle} segments={vm.reasons.map((reason, index) => ({ percentage: reason.share, color: reasonColor(index) }))}>
               <Stack align="center"><Text size="value" weight={800}>{vm.summary.total}</Text><Text size="xs" tone="muted">cancelamentos</Text></Stack>
             </MultiDonutChart>
-            <div className="cancellation-reason-preview">{vm.reasons.map((reason, index) => <div key={reason.id}><span className="reason-dot" style={{ background: colors[index] }} /><span><strong>{reason.label}</strong><small>{pct(reason.share)} do total{reason.avoidable ? " · tratável" : ""}</small></span><strong>{reason.count}</strong></div>)}</div>
+            <Stack gap={TOKENS.spacing[10]} style={{ flex: 1 }}>
+              {vm.reasons.map((reason, index) => <Row key={reason.id} align="center" gap={TOKENS.spacing[10]}>
+                <span className="reason-dot" style={{ background: reasonColor(index) }} />
+                <Stack gap={TOKENS.spacing[2]} style={{ flex: 1 }}>
+                  <Row align="center" gap={TOKENS.spacing[6]}>
+                    <Text size="sm" weight={700}>{reason.label}</Text>
+                    {reason.avoidable && <Badge size="xs" variant="warning">tratável</Badge>}
+                  </Row>
+                  <Text size="xs" tone="muted">{pct(reason.share)} do total</Text>
+                </Stack>
+                <Text size="sm" weight={800}>{reason.count}</Text>
+              </Row>)}
+            </Stack>
           </div>
           <Text size="xs" tone="brand" weight={700}>Ampliar e explorar relatos e OS →</Text>
         </Stack>

@@ -57,6 +57,7 @@ test("motivos abrem modal acessível com todos os casos, relatos e OS locais", a
   const nav = page.getByRole("navigation", { name: "Navegação principal" });
   await nav.getByRole("button", { name: "Cancelamentos", exact: true }).click();
   const opener = page.getByRole("button", { name: "Ampliar motivos de cancelamento" });
+  await opener.screenshot({ path: "test-results/cancellation-reasons-card.png" });
   await opener.click();
   const dialog = page.getByRole("dialog", { name: "Detalhamento dos cancelamentos" });
   await expect(dialog).toBeVisible();

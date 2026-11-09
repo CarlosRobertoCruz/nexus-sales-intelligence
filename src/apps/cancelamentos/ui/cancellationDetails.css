@@ -1,10 +1,6 @@
 .cancellation-reasons-opener { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; border-radius: 16px; }
 .cancellation-reasons-opener:hover { outline: 1px solid #7962c8; }
 .cancellation-reasons-opener:focus-visible, .cancellation-reason-filters button:focus-visible, .cancellation-detail-close:focus-visible, .cancellation-case summary:focus-visible { outline: 3px solid #ac96ff; outline-offset: 3px; }
-.cancellation-reason-preview { display: grid; gap: 12px; min-width: 0; }
-.cancellation-reason-preview > div { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.cancellation-reason-preview > div > span:nth-child(2) { flex: 1; }
-.cancellation-reason-preview small { display: block; color: #aba4c0; margin-top: 3px; }
 .cancellation-detail-summary { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 24px; align-items: center; padding-block: 12px 24px; }
 .cancellation-reason-filters { display: grid; gap: 8px; }
 .cancellation-reason-filters button, .cancellation-detail-close { display: flex; align-items: center; gap: 10px; padding: 12px; min-height: 44px; color: #f3f0fc; background: #171426; border: 1px solid #39304f; border-radius: 10px; cursor: pointer; text-align: left; }
