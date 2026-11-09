@@ -2,6 +2,12 @@
 
 ## Detalhamento do BI e catálogo de planos
 
+### Motivo do cancelamento
+
+A classificação do motivo lê abertura e fechamento separadamente. Uma causa explícita na abertura tem prioridade; perguntas de retenção, alternativas oferecidas, negativas e reclamações sobre concluir o cancelamento não comprovam insatisfação com o serviço. Multa, garantia contratual, faturas pendentes ou encaminhamento ao financeiro, isoladamente, não comprovam motivo financeiro. Este exige relato de dificuldade para manter/pagar o serviço, custo ou outra causa financeira explícita. Mudança efetiva de imóvel/endereço mantém sua categoria específica; não se confunde com uma alternativa de mudança oferecida pela equipe. O fechamento pode complementar causa ausente quando explicita o motivo. Evidência ausente ou ambígua fica em Outros motivos, sem inferir por palavras soltas.
+
+Esta mudança não altera a regra de confirmação, IDs, datas nem o total dos cancelamentos. Após atualizar API e web, `dc run --rm --no-deps history rebuild-metrics` redistribui os motivos com dados locais. Não requer migração nem consultas à Hubsoft.
+
 O catálogo compartilhado reconhece Nexus Essencial, Nexus Pro, Nexus Family, Nexus Gamer e Ultra somente internet, mantendo os produtos antigos separados. A combinação documentada de 900 Mega + aplicativo Standard + Premium recebe um rótulo descritivo com nome comercial não informado; velocidade isolada não identifica um produto. Gráficos e tabelas usam o mesmo catálogo. A visão geral oculta apenas categorias sem movimento no período atual e anterior.
 
 O cartão de motivos de cancelamento abre um modal com filtros para todos os motivos, incluindo Outros. Cada atendimento mostra abertura, fechamento e as cinco OS mais recentes disponíveis na base local, por código de cliente ou vínculo exato de atendimento/OS. Não cruza clientes apenas pelo nome. Checklists não são usados. O histórico considera OS registradas até o atendimento/fechamento e as diretamente vinculadas, inclusive concluídas depois. Datas ausentes e histórico parcial ficam explícitos; abrir o modal não consulta a Hubsoft. Linhas identificadas como credenciais são omitidas da cópia de leitura; a origem fica preservada. As regras de inclusão dos indicadores permanecem iguais.
