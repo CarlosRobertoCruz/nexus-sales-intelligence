@@ -1,8 +1,9 @@
-import type { CancellationReasonId, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
+import type { RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReactivation, ClassifiedRenewal, ClassifiedSale, ImportedWorksheet, ProcessedAttendance, SpreadsheetCell } from "../types/spreadsheetImport";
 import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
 import { recognizeCommercialPlan } from "../../../core/config/commercialPlans";
 import { buildCancellationDetail } from "./cancellationDetails";
+import { extractCancellationReason } from "./cancellationReason";
 
 type RowRecord = Readonly<Record<string, SpreadsheetCell>>;
 type ServiceOrder = {
@@ -249,18 +250,6 @@ function extractBenefit(combinedText: string): { id: RenewalBenefitId; label: st
   return { id: "none", label: "Sem benefício adicional" };
 }
 
-function extractCancellationReason(combinedText: string): { id: CancellationReasonId; label: string } {
-  const normalized = normalize(combinedText);
-  if (/sem cobertura|fora da area de cobertura|sem viabilidade/.test(normalized)) return { id: "no-coverage", label: "Mudança para local sem cobertura" };
-  if (/insatisfa[cç][aã]o|quedas|oscila[cç][aã]o|problema.*conex[aã]o/.test(normalized)) return { id: "dissatisfaction", label: "Insatisfação com o serviço" };
-  if (/outro provedor|outra operadora|ja (?:havia|possui|tinha) internet/.test(normalized)) return { id: "existing-provider", label: "Outro provedor no endereço" };
-  if (/financeir|sem condi[cç][oõ]es|valor.*alto|inadimpl/.test(normalized)) return { id: "financial", label: "Motivo financeiro" };
-  if (/fechamento do com[eé]rcio|encerrou.*atividades/.test(normalized)) return { id: "closed-business", label: "Fechamento do comércio" };
-  if (/pouco uso|n[aã]o utiliza|n[aã]o necessita/.test(normalized)) return { id: "low-usage", label: "Pouco uso" };
-  if (/mudan[cç]a|se mudou|novo endere[cç]o|entregou o im[oó]vel/.test(normalized)) return { id: "moving", label: "Mudança de endereço" };
-  return { id: "other", label: "Outros motivos" };
-}
-
 function validAddressPart(value: string): string {
   const normalized = normalize(value);
   return normalized && !/^(?:n\/?a|nao informad[oa]|-|sem bairro)$/.test(normalized) ? value.trim() : "";
@@ -490,7 +479,7 @@ export function classifyCommercialRows(
         cancellationOutcomes[outcome] += 1;
         continue;
       }
-      const reason = extractCancellationReason(combined);
+      const reason = extractCancellationReason(text(row, "descricao_abertura"), text(row, "descricao_fechamento"));
       cancellations.push({
         id: protocol,
         date,
