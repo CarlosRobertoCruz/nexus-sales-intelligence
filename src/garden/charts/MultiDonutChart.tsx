@@ -29,6 +29,7 @@ type MultiDonutChartProps = {
   strokeWidth?: number;
   children?: ReactNode;
   tooltip?: MultiDonutChartTooltipProps;
+  onSegmentSelect?: (index: number) => void;
 };
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
@@ -61,6 +62,7 @@ export function MultiDonutChart({
   strokeWidth = 8,
   children,
   tooltip,
+  onSegmentSelect,
 }: MultiDonutChartProps) {
   const [pointer, setPointer] = useState<{ clientX: number; clientY: number; origIdx: number } | null>(
     null,
@@ -155,9 +157,10 @@ export function MultiDonutChart({
             strokeLinecap="round"
             style={{
               ...ringStyle,
-              cursor: tooltip ? "default" : undefined,
-              pointerEvents: tooltip ? "stroke" : undefined,
+              cursor: onSegmentSelect ? "pointer" : tooltip ? "default" : undefined,
+              pointerEvents: tooltip || onSegmentSelect ? "stroke" : undefined,
             }}
+            onClick={() => { clearHover(); onSegmentSelect?.(item.origIdx); }}
             onMouseEnter={(e) => {
               if (!tooltip) return;
               setPointer({ clientX: e.clientX, clientY: e.clientY, origIdx: item.origIdx });

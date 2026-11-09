@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
-import { DonutChart } from "@/garden/charts";
+import { MultiDonutChart } from "@/garden/charts";
+import type { SellerId } from "@/core/types/commercialDashboard";
 import { Badge, KpiCard, Row, Stack, Surface, Text } from "@/garden/foundations";
 import { CheckCheckIcon, SalesChartIcon, SparklesIcon, UsersIcon } from "@/garden/foundations/assets/icons/icons";
 import { TOKENS } from "@/garden/tokens";
 import { TEAM_COPY } from "../copy/teamCopy";
 import { useTeamController } from "../controller/useTeamController";
 import type { TeamSnapshot } from "../types/team";
+
+const memberColors: Record<SellerId, string> = { beatriz: "#ac91ff", karini: "#32c4ef", giovanna: "#f472b6", sara: "#ffb429", luana: "#2bd9ae", unknown: "#a69bc7" };
 
 function Trend({ value }: { value: string }) {
   const favorable = value.startsWith("+");
@@ -47,7 +50,7 @@ export function TeamPage({ snapshot, periodSelector }: { snapshot?: TeamSnapshot
                     </Row>
                     <Stack gap={TOKENS.spacing[8]}>
                       <Row align="center" justify="space-between"><Text size="xs" tone="muted">{member.share.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% da equipe</Text><Row align="center" gap={TOKENS.spacing[8]}><Text size="sm" weight={800}>{member.production}</Text><Trend value={member.growth} /></Row></Row>
-                      <div className="team-production-track"><div style={{ width: `${(member.production / vm.maxProduction) * 100}%`, background: TOKENS.color.chart.seriesPrimary }} /></div>
+                      <div className="team-production-track"><div style={{ width: `${(member.production / vm.maxProduction) * 100}%`, background: memberColors[member.id] }} /></div>
                     </Stack>
                   </div>
                 ))}
@@ -59,9 +62,21 @@ export function TeamPage({ snapshot, periodSelector }: { snapshot?: TeamSnapshot
             <Stack gap={TOKENS.spacing[20]}>
               <Stack gap={TOKENS.spacing[4]}><Text size="xl" weight={800}>{TEAM_COPY.concentrationTitle}</Text><Text size="sm" tone="muted">{TEAM_COPY.concentrationDescription}</Text></Stack>
               <Row align="center" justify="center" gap={TOKENS.spacing[24]} style={{ flexWrap: "wrap", paddingBlock: TOKENS.spacing[12] }}>
-                <DonutChart percentage={vm.summary.leaderShare} color={TOKENS.color.chart.seriesPrimary} trackColor={TOKENS.color.chart.pastel.primary} size={156} strokeWidth={9} label={`${Math.round(vm.summary.leaderShare)}%`} labelSize={24} tooltip={{ heading: vm.summary.leaderName, metricLabel: "Participação" }} />
+                <MultiDonutChart size={190} strokeWidth={10} trackColor={TOKENS.color.stroke.subtle}
+                  segments={vm.members.map(member => ({ percentage: member.share, color: memberColors[member.id] }))}
+                  tooltip={{ heading: "Concentração da produção", valueLabels: vm.members.map(member => member.name), counts: vm.members.map(member => member.production) }}>
+                  <Stack align="center" gap={TOKENS.spacing[4]}><Text size="value" weight={800} tone={null} style={{ color: memberColors[vm.members[0]?.id ?? "unknown"] }}>{vm.summary.leaderShare.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</Text><Text size="xs" tone="muted">{vm.summary.leaderProduction ? vm.summary.leaderName : "Sem produção"}</Text></Stack>
+                </MultiDonutChart>
                 <Stack gap={TOKENS.spacing[8]} style={{ maxWidth: TOKENS.size[200] }}><Text size="xs" weight={700} tone="brand">LIDERANÇA NO PERÍODO</Text><Text size="lg" weight={800}>{vm.summary.leaderName}</Text><Text size="sm" tone="muted">{vm.summary.leaderProduction} movimentações comerciais no período selecionado.</Text></Stack>
               </Row>
+              <div aria-label="Participação por colaboradora" style={{ display: "grid", gap: 14 }}>
+                {vm.members.map(member => <Row key={member.id} align="center" gap={TOKENS.spacing[10]}>
+                  <span className="reason-dot" style={{ background: memberColors[member.id] }} />
+                  <Text size="sm" style={{ flex: 1 }}>{member.name}</Text>
+                  <Text size="sm" weight={800} tone={null} style={{ color: memberColors[member.id] }}>{member.share.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</Text>
+                  <Text size="xs" tone="muted">{member.production}</Text>
+                </Row>)}
+              </div>
             </Stack>
           </Surface>
         </section>

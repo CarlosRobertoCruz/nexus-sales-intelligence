@@ -1,4 +1,4 @@
-import type { CancellationReasonId, CommercialDashboardBundle, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
+import type { CancellationOrderDetail, CancellationReasonId, CommercialDashboardBundle, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 
 export type SpreadsheetCell = string | number | boolean | Date | null;
 export type SpreadsheetMatrix = ReadonlyArray<ReadonlyArray<SpreadsheetCell>>;
@@ -63,6 +63,12 @@ export type ClassifiedCancellation = {
   reasonLabel: string;
   location: string;
   completed: boolean;
+  detail?: {
+    openingReport: string;
+    closingReport: string;
+    orders: ReadonlyArray<CancellationOrderDetail>;
+    availableOrders: number;
+  };
 };
 
 export type ClassifiedReactivation = {

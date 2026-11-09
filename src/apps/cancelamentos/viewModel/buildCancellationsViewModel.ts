@@ -38,6 +38,7 @@ export function buildCancellationsViewModel(snapshot: CancellationsSnapshot) {
     reasons: snapshot.reasons.map((reason) => ({ ...reason, share: calculateCancellationShare(reason.count, total) })),
     locations: snapshot.locations.map((location) => ({ ...location, growth: formatGrowth(calculateCancellationGrowth(location.current, location.previous)) })),
     recentCancellations: snapshot.recentCancellations,
+    details: snapshot.details,
   } as const;
 }
 

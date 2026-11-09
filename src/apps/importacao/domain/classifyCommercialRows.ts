@@ -1,6 +1,8 @@
 import type { CancellationReasonId, RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReactivation, ClassifiedRenewal, ClassifiedSale, ImportedWorksheet, ProcessedAttendance, SpreadsheetCell } from "../types/spreadsheetImport";
 import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
+import { recognizeCommercialPlan } from "../../../core/config/commercialPlans";
+import { buildCancellationDetail } from "./cancellationDetails";
 
 type RowRecord = Readonly<Record<string, SpreadsheetCell>>;
 type ServiceOrder = {
@@ -32,14 +34,6 @@ const REQUIRED_OS_HEADERS = ["numero_ordem_servico", "tipo_ordem_servico", "stat
 
 const SELLERS = COMMERCIAL_SELLERS;
 
-const PLANS: ReadonlyArray<{ id: SalesPlanId; label: string; pattern: RegExp }> = [
-  { id: "combo-total-plus", label: "600 Mega Combo Total Plus", pattern: /600\s*mega\s*combo\s*total\s*plus/ },
-  { id: "combo-view", label: "600 Mega Combo View", pattern: /600\s*mega\s*combo\s*view/ },
-  { id: "combo-plus", label: "600 Mega Combo Plus", pattern: /600\s*mega(?:\s*combo)?\s*plus/ },
-  { id: "combo-ultra", label: "720 Mega Combo Ultra", pattern: /720\s*mega(?:\s*combo)?(?:\s*ultra|\s*plus)?/ },
-  { id: "power-plus", label: "900 Mega Power Plus", pattern: /900\s*mega(?:\s*power)?\s*plus/ },
-  { id: "ultra-power", label: "1 Giga Ultra Power", pattern: /1\s*giga\s*ultra\s*power/ },
-];
 
 function normalize(value: SpreadsheetCell | string): string {
   return String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -233,8 +227,7 @@ function installationBusinessKey(order: ServiceOrder): string {
 }
 
 function extractPlan(combinedText: string): { id: SalesPlanId; label: string } {
-  const normalized = normalize(combinedText);
-  return PLANS.find((plan) => plan.pattern.test(normalized)) ?? { id: "other", label: "Outros planos" };
+  return recognizeCommercialPlan(combinedText);
 }
 
 function resolveSeller(row: RowRecord, combinedText: string): { id: SellerId; name: string } {
@@ -507,6 +500,7 @@ export function classifyCommercialRows(
         reasonLabel: reason.label,
         location: locationFromAttendance(row, linkedOrder, combined),
         completed: true,
+        detail: buildCancellationDetail(row, commercialOsRows),
       });
       classifiedProtocols.add(protocol);
     }

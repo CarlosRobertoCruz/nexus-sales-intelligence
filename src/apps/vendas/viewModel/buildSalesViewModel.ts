@@ -12,6 +12,7 @@ export function buildSalesViewModel(snapshot: SalesSnapshot) {
   const previousTotal = snapshot.plans.reduce((total, plan) => total + plan.previous, 0);
   const leader = [...snapshot.sellers].sort((a, b) => b.current - a.current)[0];
   const topPlan = [...snapshot.plans].sort((a, b) => b.current - a.current)[0];
+  const visiblePlans = snapshot.plans.filter(plan => plan.current > 0 || plan.previous > 0);
 
   return {
     sourceLabel: snapshot.sourceLabel,
@@ -32,7 +33,7 @@ export function buildSalesViewModel(snapshot: SalesSnapshot) {
       current: snapshot.monthly.map((item) => item.currentYear),
       previous: snapshot.monthly.map((item) => item.previousYear),
     },
-    plans: snapshot.plans.map((plan) => ({
+    plans: (visiblePlans.length ? visiblePlans : snapshot.plans).map((plan) => ({
       ...plan,
       max: Math.max(plan.current, plan.previous),
       growth: formatGrowth(calculateSalesGrowth(plan.current, plan.previous)),
