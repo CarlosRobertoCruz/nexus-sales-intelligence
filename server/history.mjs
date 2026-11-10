@@ -23,7 +23,9 @@ export async function createHistoryJob(db,manifest) {
   }
   const id=randomUUID();
   await db.query('INSERT INTO history_jobs(id,phase,manifest) VALUES($1,$2,$3::jsonb)',[id,manifest.phase,JSON.stringify(manifest)]);
-  if(manifest.phase==='history') await db.query('UPDATE history_jobs SET next_at=GREATEST(next_at,(SELECT next_at FROM history_jobs WHERE id=$2)) WHERE id=$1',[id,manifest.approvedOctoberJob]);
+  if(manifest.phase==='history') await db.query(`UPDATE history_jobs SET next_at=GREATEST(next_at,
+    (SELECT next_at FROM history_jobs WHERE id=$2),
+    (SELECT max(next_at) FROM history_jobs WHERE phase='history' AND approved AND state='complete')) WHERE id=$1`,[id,manifest.approvedOctoberJob]);
   return id;
 }
 export async function historyStatus(db,id) {
@@ -40,7 +42,14 @@ export async function historyStatus(db,id) {
     (SELECT max(observed_at) FROM history_followup_attendances WHERE job_id=$1) AS last_observed_at`,[id])).rows[0] : undefined;
   const savedDiagnostic=job.error_code?(await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_diagnostic:${id}`])).rows[0]?.value:undefined;
   const diagnostic=savedDiagnostic?safeHubsoftDiagnostic(new HubsoftMappingError(job.error_code,savedDiagnostic.kind,savedDiagnostic.missingFields,savedDiagnostic.invalidFields)):undefined;
-  return {...job,totals,pages,calls,...(followup ? {followup} : {}),...(diagnostic ? {diagnostic} : {})};
+  let scope={};
+  if(job.phase==='history') {
+    const manifest=(await db.query('SELECT manifest FROM history_jobs WHERE id=$1',[id])).rows[0].manifest;
+    const months=monthsFor(manifest);
+    const monthTotals=(await db.query('SELECT month,kind,count(*)::int AS records FROM history_records WHERE job_id=$1 GROUP BY month,kind ORDER BY month,kind',[id])).rows;
+    scope={months,current_month:months[job.month_index]??null,month_totals:monthTotals};
+  }
+  return {...job,...scope,totals,pages,calls,...(followup ? {followup} : {}),...(diagnostic ? {diagnostic} : {})};
 }
 export async function controlHistoryJob(db,id,action) {
   const state=action==='pause'?'paused':action==='cancel'?'cancelled':action==='start'?'running':null;
@@ -79,7 +88,7 @@ export async function historyStep(pool,client,id) {
     if(job.state!=='running'||new Date(job.next_at).getTime()>Date.now()) return historyStatus(db,id);
     const m=job.manifest,month=monthsFor(m)[job.month_index];
     const protocolMode=usesProtocolPilot(m,id);
-    if(protocolMode&&client.gate?.interval!==undefined&&client.gate.interval!==1000) throw codeError('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
+    if((protocolMode||m.phase==='history')&&client.gate?.interval!==undefined&&client.gate.interval!==1000) throw codeError('PILOTO_PROTOCOLO_EXIGE_1_REQ_S');
     if(!month) return historyStatus(db,id);
     const windowAt=nextWindowAt(m.window);
     if(windowAt>Date.now()+1000) {await db.query('UPDATE history_jobs SET next_at=$2 WHERE id=$1',[id,new Date(windowAt)]);return historyStatus(db,id);}
@@ -255,6 +264,7 @@ export async function approveHistoryMonth(pool,id,evidence) {
 // Records explicit operator approval without starting the worker or clearing caches.
 export function enablePilotProtocol(pool,id) { return enableProtocolException(pool,id,'day'); }
 export function enableOctoberProtocol(pool,id) { return enableProtocolException(pool,id,'october'); }
+export function enableHistoryProtocol(pool,id) { return enableProtocolException(pool,id,'history'); }
 async function enableProtocolException(pool,id,phase) {
   if(phase==='october'&&id!==OCTOBER_PROTOCOL_JOB_ID) throw codeError('EXCECAO_PROTOCOLO_FORA_DE_OUTUBRO');
   const db=await pool.connect();let locked=false;
@@ -263,9 +273,10 @@ async function enableProtocolException(pool,id,phase) {
     if(!locked) throw codeError('SINCRONIZACAO_EM_ANDAMENTO');
     await db.query('BEGIN');
     const job=(await db.query('SELECT * FROM history_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];
-    if(job?.state!=='paused'||job.phase!==phase||(phase==='day'&&job.manifest.peakDay!=='2026-10-01')) throw codeError('ESTADO_NAO_PERMITE_EXCECAO');
-    if(job.manifest.enrichmentStrategy!=='protocol'&&job.error_code!=='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO') throw codeError('ERRO_NAO_PERMITE_EXCECAO');
-    const scope=phase==='day'?{day:job.manifest.peakDay}:{month:'2026-10'};
+    const allowedState=phase==='history'?['planned','paused'].includes(job?.state):job?.state==='paused';
+    if(!allowedState||job.phase!==phase||(phase==='day'&&job.manifest.peakDay!=='2026-10-01')) throw codeError('ESTADO_NAO_PERMITE_EXCECAO');
+    if(job.manifest.enrichmentStrategy!=='protocol'&&job.state!=='planned'&&job.error_code!=='HUBSOFT_ATENDIMENTO_NAO_RESOLVIDO') throw codeError('ERRO_NAO_PERMITE_EXCECAO');
+    const scope=phase==='day'?{day:job.manifest.peakDay}:phase==='history'?{months:monthsFor(job.manifest),cutoff:job.manifest.cutoff}:{month:'2026-10'};
     const manifest={...job.manifest,enrichmentStrategy:'protocol',protocolException:{enabled:true,jobId:id,...scope,authorizedAt:new Date().toISOString()}};
     validateManifest(manifest);
     usesProtocolPilot(manifest,id);

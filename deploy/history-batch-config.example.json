@@ -1,0 +1,18 @@
+{
+  "approvedOctoberJob": "65a3be4d-9fe8-4ded-82c9-7497260b90bf",
+  "snapshotDate": "2026-11-09",
+  "followupCutoff": "2026-10-31",
+  "maxCalls": 5000,
+  "reports": [
+    {
+      "month": "2026-01",
+      "attendance": "SUBSTITUA_PELO_RELATORIO_DE_ATENDIMENTOS_DE_JANEIRO.zip",
+      "serviceOrders": "SUBSTITUA_PELO_RELATORIO_DE_OS_CONCLUIDAS_EM_JANEIRO.zip"
+    },
+    {
+      "month": "2026-02",
+      "attendance": "SUBSTITUA_PELO_RELATORIO_DE_ATENDIMENTOS_DE_FEVEREIRO.zip",
+      "serviceOrders": "SUBSTITUA_PELO_RELATORIO_DE_OS_CONCLUIDAS_EM_FEVEREIRO.zip"
+    }
+  ]
+}

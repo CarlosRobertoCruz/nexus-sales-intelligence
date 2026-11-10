@@ -1,5 +1,7 @@
 # Carga histórica Hubsoft de 2026
 
+**Atualização de 09/11/2026:** a fase histórica usa agora lotes explícitos de até dois meses, com aprovação separada por mês. O fluxo e a preparação dos relatórios estão em [HISTORY_BATCHES.md](HISTORY_BATCHES.md); substituem o percurso implícito janeiro–setembro descrito nas seções antigas. Planejamento offline não inicia carga real.
+
 ## Detalhamento do BI e catálogo de planos
 
 ### Motivo do cancelamento
