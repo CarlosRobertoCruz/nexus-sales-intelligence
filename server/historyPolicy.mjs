@@ -1,3 +1,4 @@
+import {automaticMonths,validateAutomaticManifest} from './automaticPolicy.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 export function exactId(value) {
   if(typeof value==='number' && (!Number.isSafeInteger(value)||value<0)) return fail('IDENTIFICADOR_INVALIDO');
@@ -16,6 +17,7 @@ export const OCTOBER_PROTOCOL_JOB_ID='65a3be4d-9fe8-4ded-82c9-7497260b90bf';
 // Each opt-in is bound to its authorized job and period. A historical batch
 // receives a separate permission; it never inherits the October exception.
 export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
+  if(m?.phase==='automatic') { validateAutomaticManifest(m); return true; }
   const strategy=m?.enrichmentStrategy??'client';
   if(strategy==='client') return false;
   if(strategy!=='protocol') return fail('ESTRATEGIA_ENRIQUECIMENTO_INVALIDA');
@@ -42,6 +44,7 @@ export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
   return true;
 }
 export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo'})) {
+  if(m?.phase==='automatic') return validateAutomaticManifest(m,today);
   if(!m||m.year!==2026||!['day','october','history'].includes(m.phase)) return fail('MANIFESTO_INVALIDO');
   usesProtocolPilot(m);
   if(m.phase==='history') {
@@ -104,6 +107,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   return m;
 }
 export function monthsFor(m) {
+  if(m.phase==='automatic') return automaticMonths(m);
   if(m.phase!=='history') return ['2026-10'];
   const months=m.months;
   if(!Array.isArray(months)||months.length<1||months.length>2||months.some(month=>!/^2026-0[1-9]$/.test(month))||
@@ -111,6 +115,11 @@ export function monthsFor(m) {
   return [...months];
 }
 export function daysFor(m,month) {
+  if(m.phase==='automatic') {
+    if(!monthsFor(m).includes(month)) return fail('MES_FORA_DO_LOTE');
+    const count=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5)),0)).getUTCDate();
+    return Array.from({length:count},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`).filter(day=>day>=m.from&&day<=m.cutoff);
+  }
   if(m.phase==='day') return [m.peakDay];
   if(m.phase==='history'&&!monthsFor(m).includes(month)) return fail('MES_FORA_DO_LOTE');
   const count=new Date(Date.UTC(2026,Number(month.slice(5)),0)).getUTCDate();

@@ -1,5 +1,7 @@
 # Carga histórica Hubsoft de 2026
 
+**Atualizacao de 10/11/2026:** o novo [AUTOMATIC_SYNC.md](AUTOMATIC_SYNC.md) permite carga historica e atualizacao diaria sem exportacoes mensais, com validacao tecnica propria. Exige migracao e ativacao unica na VPS. O fluxo de relatorios abaixo continua disponivel para conferencia manual; nao e requisito do modo automatic.
+
 **Atualização de 09/11/2026:** a fase histórica usa agora lotes explícitos de até dois meses, com aprovação separada por mês. O fluxo e a preparação dos relatórios estão em [HISTORY_BATCHES.md](HISTORY_BATCHES.md); substituem o percurso implícito janeiro–setembro descrito nas seções antigas. Planejamento offline não inicia carga real.
 
 ## Detalhamento do BI e catálogo de planos

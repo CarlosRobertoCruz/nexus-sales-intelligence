@@ -1,5 +1,7 @@
 # Nexus Sales Intelligence na VPS AlmaLinux 9
 
+**Atualizacao automatica:** [AUTOMATIC_SYNC.md](AUTOMATIC_SYNC.md) documenta o novo servico opt-in, a migracao `004_automatic_sync.sql` e a ativacao unica da carga historica seguida de revisao diaria. O deploy comum nao inicia consultas.
+
 Dominio: **https://sales.nexusfibra.net.br**.
 
 ## O que muda
@@ -374,3 +376,6 @@ Esta atualização inclui também a rolagem independente da lateral em desktop. 
 ## Preparacao da carga historica de 2026
 
 Esta etapa adiciona as migracoes `002_history.sql` e `003_attendance_followups.sql`, gate compartilhado com a consulta manual, cache OAuth cifrado e um script opt-in. Reconstruir API e web e executar migrate antes da API nova. A carga permanece desativada por padrao; nao adicionar flags true nem iniciar job durante o deploy. Consulte [HISTORY.md](HISTORY.md) para planejamento offline, requisitos dos relatorios, operacao dos pilotos e validacao antes da publicacao. Nao exige autorizacao adicional de administrador Hubsoft; exige as permissoes tecnicas da credencial existente e coordenacao dos consumidores do IP.
+## Sincronizacao automatica
+
+Para carga historica seguida de atualizacao diaria, consulte [AUTOMATIC_SYNC.md](AUTOMATIC_SYNC.md). Essa funcionalidade adiciona `004_automatic_sync.sql` e o servico opt-in `automatic`, no perfil `automation`. Nao iniciar o perfil durante um deploy comum. O servico compartilha imagem, banco, gate e OAuth com a API.

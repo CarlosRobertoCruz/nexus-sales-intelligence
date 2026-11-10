@@ -45,6 +45,15 @@ services:
     cpus: 0.5
     entrypoint: [node, server/jobs/import-year.mjs]
     command: [help]
+  automatic:
+    <<: *api
+    profiles: [automation]
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    entrypoint: [node, server/jobs/automatic-sync.mjs]
+    command: [run]
+    stop_grace_period: 70s
   migrate:
     <<: *api
     profiles: [tools]
