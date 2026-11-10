@@ -1,21 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import {mergeAttendanceDetail} from './historyAttendanceDetail.mjs';
+import {clientCode,normalized,normalizedAttendanceDetail,normalizeDate} from './historyNormalization.mjs';
+import {automaticEnrichmentStep,checkedOrders} from './automaticEnrichment.mjs';
 import {safeHubsoftDiagnostic,HubsoftMappingError} from './hubsoftDiagnostics.mjs';
 import {compareHistoryReport} from './historyReconciliation.mjs';
-import { validateManifest,monthsFor,daysFor,exactId,localDay,assertContractRecord,nextWindowAt,usesProtocolPilot,OCTOBER_PROTOCOL_JOB_ID } from './historyPolicy.mjs';
-import { normalizeHubsoft } from './hubsoftAdapter.mjs';
+import { validateManifest,monthsFor,daysFor,exactId,localDay,nextWindowAt,usesProtocolPilot,OCTOBER_PROTOCOL_JOB_ID } from './historyPolicy.mjs';
 import { upsertRows,rebuild } from './records.mjs';
 import { projectHistoryRecord } from './historyProjection.mjs';
-import {orderDate,orderDates,stageFollowups,publishFollowups} from './historyFollowup.mjs';
+import {orderDate,stageFollowups,publishFollowups} from './historyFollowup.mjs';
 import {markCapturedDrafts} from './historyDrafts.mjs';
 const codeError=code=>Object.assign(new Error(code),{code});
 const streams=['attendance','attendanceChanges','serviceOrders','serviceOrderCompletions'];
 
 export async function createHistoryJob(db,manifest) {
   validateManifest(manifest);
-  if(manifest.phase==='history') {
+  if(['history','automatic'].includes(manifest.phase)) {
     const parent=(await db.query("SELECT * FROM history_jobs WHERE id=$1 AND phase='october' AND approved AND state='complete'",[manifest.approvedOctoberJob])).rows[0];
-    if(!parent || parent.manifest.osDateField!==manifest.osDateField || Boolean(parent.manifest.followupCutoff)!==Boolean(manifest.followupCutoff)) throw codeError('PILOTO_OUTUBRO_OBRIGATORIO');
+    if(!parent || parent.manifest.osDateField!==manifest.osDateField || (manifest.phase==='history'&&Boolean(parent.manifest.followupCutoff)!==Boolean(manifest.followupCutoff))) throw codeError('PILOTO_OUTUBRO_OBRIGATORIO');
   }
   if(manifest.phase==='october') {
     const parent=(await db.query("SELECT id,manifest FROM history_jobs WHERE id=$1 AND phase='day' AND approved AND state='complete'",[manifest.approvedDayJob])).rows[0];
@@ -43,7 +43,7 @@ export async function historyStatus(db,id) {
   const savedDiagnostic=job.error_code?(await db.query('SELECT value FROM application_settings WHERE key=$1',[`hubsoft_history_diagnostic:${id}`])).rows[0]?.value:undefined;
   const diagnostic=savedDiagnostic?safeHubsoftDiagnostic(new HubsoftMappingError(job.error_code,savedDiagnostic.kind,savedDiagnostic.missingFields,savedDiagnostic.invalidFields)):undefined;
   let scope={};
-  if(job.phase==='history') {
+  if(['history','automatic'].includes(job.phase)) {
     const manifest=(await db.query('SELECT manifest FROM history_jobs WHERE id=$1',[id])).rows[0].manifest;
     const months=monthsFor(manifest);
     const monthTotals=(await db.query('SELECT month,kind,count(*)::int AS records FROM history_records WHERE job_id=$1 GROUP BY month,kind ORDER BY month,kind',[id])).rows;
@@ -60,21 +60,6 @@ export async function controlHistoryJob(db,id,action) {
 }
 function businessDay(kind,record,manifest) {
   return localDay(kind==='attendance'?record.data_cadastro:record[manifest.osDateField],kind!=='attendance');
-}
-function clientCode(raw) { return raw.cliente?.codigo_cliente??raw.cliente_servico?.cliente?.codigo_cliente??raw.codigo_cliente; }
-function normalizedAttendanceDetail(raw,detail,customer,created) {
-  if(!detail||exactId(detail.id_atendimento)!==exactId(raw.id_atendimento)) throw codeError('HUBSOFT_ATENDIMENTO_ID_DIVERGENTE');
-  if(String(detail.protocolo)!==exactId(raw.protocolo)) throw codeError('HUBSOFT_PROTOCOLO_DIVERGENTE');
-  if(exactId(clientCode(detail))!==customer) throw codeError('HUBSOFT_CLIENTE_DIVERGENTE');
-  if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
-  if(detail.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
-  return normalized('attendance',mergeAttendanceDetail(raw,detail),{allowIncompleteBusinessFields:true});
-}
-function normalized(kind,raw,{allowIncompleteBusinessFields=false}={}) {
-  const row=kind==='serviceOrders' ? normalizeHubsoft(kind,orderDates(raw),{},{requireScheduled:false}) : normalizeHubsoft(kind,raw,{},{allowIncompleteBusinessFields});
-  if(kind==='attendance') { row.data_cadastro=row.data_cadastro.split(' ')[0]; row.date_precision='day'; }
-  assertContractRecord(kind,row);
-  return row;
 }
 
 // Uma etapa recebe/processa uma página ou resolve um cliente. Nenhum loop remoto ilimitado.
@@ -107,7 +92,23 @@ export async function historyStep(pool,client,id) {
       if(!current) {
         // Os filtros do manifesto são cobertura de cadastro/programação/conclusão explícita.
         const result=await client.page(stream,day,page,stream==='serviceOrders'?m.osDateField:undefined);
-        await db.query('INSERT INTO history_pages(job_id,day,stream,page,records,complete) VALUES($1,$2,$3,$4,$5::jsonb,$6)',[id,day,stream,page,JSON.stringify(result.records.map(r=>projectHistoryRecord(r))),result.complete]);
+        if(m.phase==='automatic') {
+          const field=kind==='attendance'?'id_atendimento':'id_ordem_servico';
+          const ids=result.records.map(record=>exactId(record[field]));
+          const previous=(await db.query('SELECT records FROM history_pages WHERE job_id=$1 AND day=$2 AND stream=$3',[id,day,stream])).rows;
+          const seen=new Set(previous.flatMap(row=>row.records.map(record=>exactId(record[field]))));
+          if(new Set(ids).size!==ids.length||ids.some(value=>seen.has(value))) throw codeError('HUBSOFT_PAGINAS_REPETIDAS');
+          for(const record of result.records) {
+            const value=stream==='attendance'?record.data_cadastro_br??record.data_cadastro:stream==='serviceOrderCompletions'?record.data_termino_executado:record.data_ultima_alteracao??record.updated_at;
+            const timestamp=stream==='serviceOrderCompletions'||(stream==='attendanceChanges'&&/[T ]\d{2}:\d{2}/.test(String(value)));
+            if(value&&(timestamp?localDay(orderDate(value),true):localDay(normalizeDate(value)))!==day) throw codeError('HUBSOFT_FILTRO_DE_DATA_DIVERGENTE');
+          }
+        }
+        const captured=m.phase==='automatic'&&kind==='attendance'?result.records.filter(record=>{
+          const created=localDay(normalizeDate(record.data_cadastro_br??record.data_cadastro));
+          return created>=m.startDate&&created<=m.cutoff;
+        }):result.records;
+        await db.query('INSERT INTO history_pages(job_id,day,stream,page,records,complete) VALUES($1,$2,$3,$4,$5::jsonb,$6)',[id,day,stream,page,JSON.stringify(captured.map(r=>projectHistoryRecord(r))),result.complete]);
         return historyStatus(db,id);
       }
       const rows=[],followups=[];
@@ -117,11 +118,20 @@ export async function historyStep(pool,client,id) {
         // completion query an undated order cannot be counted as production.
         if(rawDate) {
           const date=kind==='attendance' ? localDay(normalizeDate(rawDate)) : localDay(orderDate(rawDate),true);
-          if(!selectedDays.has(date)) continue;
+          if(m.phase==='automatic'&&stream==='attendanceChanges') {
+            if(date<m.startDate||date>m.cutoff) continue;
+            if(!selectedDays.has(date)) {
+              const known=(await db.query(`SELECT 1 FROM source_records WHERE kind='attendance' AND id=$1
+                AND COALESCE(payload->>'publication_scope','published')='published'`,[`hubsoft:${exactId(raw.id_atendimento)}`])).rows.length;
+              // Do not expose a new, partially loaded historical month just
+              // because a recent change references an older attendance.
+              if(!known) continue;
+            }
+          } else if(!selectedDays.has(date)) continue;
         } else if(kind==='serviceOrders' && m.osDateField==='data_termino_executado') throw codeError('HUBSOFT_OS_CONCLUSAO_AUSENTE');
         if(raw.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
         let detail=null,cache=null;
-        let needsDetail=kind==='attendance' && Boolean(m.followupCutoff);
+        let needsDetail=kind==='attendance' && (Boolean(m.followupCutoff)||m.phase==='automatic');
         if(kind==='attendance'&&!needsDetail) {
           try {normalized(kind,raw);}
           catch(error) {if(!error.diagnostic?.missingFields?.some(field=>['usuario_abertura','descricao_abertura','tipo_atendimento'].includes(field)))throw error;needsDetail=true;}
@@ -129,7 +139,7 @@ export async function historyStep(pool,client,id) {
         if(needsDetail) {
           const customer=exactId(clientCode(raw));
           const created=localDay(normalizeDate(raw.data_cadastro_br??raw.data_cadastro));
-          if(!selectedDays.has(created)) continue;
+          if(!selectedDays.has(created)&&!(m.phase==='automatic'&&stream==='attendanceChanges'&&created>=m.startDate&&created<=m.cutoff)) continue;
           if(protocolMode) {
             const key=`hubsoft_history_protocol:${id}:${exactId(raw.id_atendimento)}`;
             const saved=(await db.query('SELECT value FROM application_settings WHERE key=$1',[key])).rows[0]?.value;
@@ -156,9 +166,10 @@ export async function historyStep(pool,client,id) {
           detail=match[0];
           if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==created) throw codeError('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
         }
-        const row=detail?normalizedAttendanceDetail(raw,detail,exactId(clientCode(raw)),localDay(normalizeDate(raw.data_cadastro_br??raw.data_cadastro))):normalized(kind,raw);
+        const row=detail?normalizedAttendanceDetail(m.phase==='automatic'?detail:raw,m.phase==='automatic'?raw:detail,exactId(clientCode(raw)),localDay(normalizeDate(raw.data_cadastro_br??raw.data_cadastro))):normalized(kind,raw);
         rows.push({kind,payload:row,origin:'direct'});
         if(kind==='attendance') {
+          if(m.phase==='automatic') checkedOrders(detail);
           if(m.followupCutoff) {
             const declared=raw.ordem_servico_count??detail.ordem_servico_count;
             const reportedOrders=declared===undefined||declared===null ? null : /^\d+$/.test(String(declared)) ? Number(declared) : NaN;
@@ -181,7 +192,7 @@ export async function historyStep(pool,client,id) {
         // Um pedido de pausa durante a chamada não descarta a página recebida.
         for(const row of rows) {
           const date=businessDay(row.kind,row.payload,m);
-          if(!selectedDays.has(date)) continue;
+          if(!selectedDays.has(date)&&!(m.phase==='automatic'&&row.kind==='attendance'&&stream==='attendanceChanges'&&date>=m.startDate&&date<=m.cutoff)) continue;
           if(row.kind==='serviceOrders'&&m.osDateField==='data_termino_executado') row.payload.data_referencia_bi='data_termino_executado';
           const upstream=exactId(row.payload[row.kind==='attendance'?'id_atendimento':'id_ordem_servico']);
           await db.query(`INSERT INTO history_records(job_id,month,kind,upstream_id,payload,origin) VALUES($1,$2,$3,$4,$5::jsonb,$6)
@@ -198,6 +209,7 @@ export async function historyStep(pool,client,id) {
       } catch(error) { await db.query('ROLLBACK'); throw error; }
       return historyStatus(db,id);
     }
+    if(m.phase==='automatic'&&await automaticEnrichmentStep(db,client,job,month)) return historyStatus(db,id);
     await db.query("UPDATE history_jobs SET state='awaiting_validation',updated_at=now() WHERE id=$1 AND state='running'",[id]);
     return historyStatus(db,id);
   } catch(error) {
@@ -215,10 +227,6 @@ export async function historyStep(pool,client,id) {
     return historyStatus(db,id);
   } finally { try {if(locked) await db.query('SELECT pg_advisory_unlock(73190602)');} finally {if(client.gate)client.gate.jobId=null;db.release();} }
 }
-function normalizeDate(value) {
-  if(/^\d{4}-\d{2}-\d{2}/.test(String(value))) { const [y,m,d]=value.slice(0,10).split('-'); return `${d}/${m}/${y}`; }
-  return value;
-}
 export async function approveHistoryMonth(pool,id,evidence) {
   const db=await pool.connect(); let locked=false;
   try {
@@ -226,6 +234,7 @@ export async function approveHistoryMonth(pool,id,evidence) {
     if(!locked) throw codeError('SINCRONIZACAO_EM_ANDAMENTO');
     await db.query('BEGIN');
     const job=(await db.query('SELECT * FROM history_jobs WHERE id=$1 FOR UPDATE',[id])).rows[0];
+    if(job?.phase==='automatic') throw codeError('AUTOMACAO_USA_VALIDACAO_TECNICA');
     if(job?.state!=='awaiting_validation') throw codeError('CARGA_NAO_AGUARDA_VALIDACAO');
     const month=monthsFor(job.manifest)[job.month_index];
     if(evidence.month!==month || !evidence.reviewer || evidence.confirmFilters!==true) throw codeError('EVIDENCIA_INVALIDA');

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "startDate": "2025-01-01",
+  "approvedOctoberJob": "65a3be4d-9fe8-4ded-82c9-7497260b90bf",
+  "backfillFrom": "2025-01",
+  "backfillThrough": "last_closed_month",
+  "dailyAt": "02:00",
+  "reviewDays": 30,
+  "maxCalls": 5000
+}
