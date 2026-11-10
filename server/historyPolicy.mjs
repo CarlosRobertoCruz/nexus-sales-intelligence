@@ -13,8 +13,8 @@ export function localDay(value,requiredTime=false) {
   return day;
 }
 export const OCTOBER_PROTOCOL_JOB_ID='65a3be4d-9fe8-4ded-82c9-7497260b90bf';
-// Each opt-in is bound to its authorized job and period. The monthly exception
-// must never be inherited by another October job or the January-September run.
+// Each opt-in is bound to its authorized job and period. A historical batch
+// receives a separate permission; it never inherits the October exception.
 export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
   const strategy=m?.enrichmentStrategy??'client';
   if(strategy==='client') return false;
@@ -26,6 +26,16 @@ export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
         permission.jobId!==jobId||permission.month!=='2026-10') return fail('EXCECAO_PROTOCOLO_FORA_DE_OUTUBRO');
     return true;
   }
+  if(m.phase==='history') {
+    let months;
+    try { months=monthsFor(m); } catch { return fail('EXCECAO_PROTOCOLO_FORA_DO_LOTE'); }
+    if(m.year!==2026||m.osDateField!=='data_termino_executado'||m.autoPublish||
+      !Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>5000||permission?.enabled!==true||permission.jobId!==jobId||
+      !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(jobId??'')||
+      !Array.isArray(permission.months)||JSON.stringify(permission.months)!==JSON.stringify(months)||permission.cutoff!==m.cutoff)
+      return fail('EXCECAO_PROTOCOLO_FORA_DO_LOTE');
+    return true;
+  }
   if(m.year!==2026||m.phase!=='day'||m.peakDay!=='2026-10-01'||!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>500||
       permission?.enabled!==true||permission.day!==m.peakDay||permission.jobId!==jobId||
       !/^[a-f\d]{8}(?:-[a-f\d]{4}){3}-[a-f\d]{12}$/i.test(permission.jobId??'')) return fail('EXCECAO_PROTOCOLO_FORA_DO_PILOTO');
@@ -34,6 +44,23 @@ export function usesProtocolPilot(m,jobId=m?.protocolException?.jobId) {
 export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{timeZone:'America/Sao_Paulo'})) {
   if(!m||m.year!==2026||!['day','october','history'].includes(m.phase)) return fail('MANIFESTO_INVALIDO');
   usesProtocolPilot(m);
+  if(m.phase==='history') {
+    const months=monthsFor(m),last=months.at(-1);
+    const end=`${last}-${String(new Date(Date.UTC(2026,Number(last.slice(5)),0)).getUTCDate()).padStart(2,'0')}`;
+    if(m.cutoff!==end) return fail('CORTE_LOTE_EXIGE_MES_FECHADO');
+    if(m.osDateField!=='data_termino_executado') return fail('LOTE_EXIGE_OS_POR_CONCLUSAO');
+    if(m.autoPublish) return fail('LOTE_EXIGE_APROVACAO_MENSAL');
+    if(!Number.isInteger(m.maxCalls)||m.maxCalls<1||m.maxCalls>5000) return fail('ORCAMENTO_LOTE_INVALIDO');
+    if(Object.keys(m.monthReports??{}).some(month=>!months.includes(month))) return fail('RELATORIO_FORA_DO_LOTE');
+    for(const month of months) for(const kind of ['attendance','serviceOrders']) {
+      const report=m.monthReports?.[month]?.[kind];
+      const keys=report?.keys??report?.ids;
+      if(!Array.isArray(keys)||keys.length>50000||new Set(keys.map(exactId)).size!==keys.length) return fail('CHAVES_MENSAIS_OBRIGATORIAS');
+      const start=`${month}-01`,end=`${month}-${String(new Date(Date.UTC(2026,Number(month.slice(5)),0)).getUTCDate()).padStart(2,'0')}`;
+      const dateField=kind==='attendance'?'data_cadastro':'data_termino_executado';
+      if(report.exportFilters?.start!==start||report.exportFilters?.end!==end||report.exportFilters?.dateField!==dateField||report.exportFilters?.otherFilters!=='none') return fail('FILTROS_RELATORIO_FORA_DO_MES');
+    }
+  }
   if(!/^2026-\d{2}-\d{2}$/.test(m.cutoff??'') || m.cutoff>=today) return fail('CORTE_EXIGE_DIA_COMPLETO');
   if(new Date(m.cutoff+'T12:00:00Z').toISOString().slice(0,10)!==m.cutoff) return fail('CORTE_INVALIDO');
   if(!['data_cadastro','data_inicio_programado','data_termino_executado'].includes(m.osDateField)) return fail('FILTRO_OS_INVALIDO');
@@ -42,7 +69,7 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
     // A monthly run may collect the follow-up cohort before its independent
     // reference is ready. It can never auto-publish in that state: approval
     // still requires a complete reference and matching evidence.
-    const pending=kind==='followup'&&['day','october'].includes(m.phase)&&report?.pending===true&&!m.autoPublish;
+    const pending=kind==='followup'&&report?.pending===true&&!m.autoPublish;
     if(report?.pending===true&&!pending) return fail('REFERENCIA_PENDENTE_NAO_PERMITIDA');
     if(!pending && (!report || typeof report.fileSha256!=='string'||!/^[a-f0-9]{64}$/.test(report.fileSha256)||!report.filters||typeof report.filters!=='object'||!report.exportedAt)) return fail('RELATORIOS_OBRIGATORIOS');
     if(!report?.filters) return fail('RELATORIOS_OBRIGATORIOS');
@@ -66,7 +93,6 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   if(m.phase==='day' && new Date(m.peakDay+'T12:00:00Z').toISOString().slice(0,10)!==m.peakDay) return fail('DIA_PILOTO_INVALIDO');
   if(m.phase==='october' && (m.cutoff<'2026-10-31'||today<='2026-10-31')) return fail('OUTUBRO_AINDA_ABERTO');
   if(m.phase==='history' && !m.approvedOctoberJob) return fail('PILOTO_OUTUBRO_OBRIGATORIO');
-  if(m.phase==='history' && m.cutoff<'2026-10-31') return fail('OUTUBRO_AINDA_ABERTO');
   if(m.followupCutoff!==undefined) {
     if(m.osDateField!=='data_termino_executado') return fail('ACOMPANHAMENTO_EXIGE_CONCLUSAO');
     if(!/^2026-\d{2}-\d{2}$/.test(m.followupCutoff)||m.followupCutoff>=today) return fail('CORTE_ACOMPANHAMENTO_INVALIDO');
@@ -77,9 +103,16 @@ export function validateManifest(m,today=new Date().toLocaleDateString('en-CA',{
   }
   return m;
 }
-export function monthsFor(m) { return m.phase==='history' ? Array.from({length:9},(_,i)=>`2026-${String(i+1).padStart(2,'0')}`) : ['2026-10']; }
+export function monthsFor(m) {
+  if(m.phase!=='history') return ['2026-10'];
+  const months=m.months;
+  if(!Array.isArray(months)||months.length<1||months.length>2||months.some(month=>!/^2026-0[1-9]$/.test(month))||
+    (months.length===2&&Number(months[1].slice(5))!==Number(months[0].slice(5))+1)) return fail('MESES_LOTE_INVALIDOS');
+  return [...months];
+}
 export function daysFor(m,month) {
   if(m.phase==='day') return [m.peakDay];
+  if(m.phase==='history'&&!monthsFor(m).includes(month)) return fail('MES_FORA_DO_LOTE');
   const count=new Date(Date.UTC(2026,Number(month.slice(5)),0)).getUTCDate();
   return Array.from({length:count},(_,i)=>`${month}-${String(i+1).padStart(2,'0')}`).filter(day=>day<=m.cutoff);
 }
