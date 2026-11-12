@@ -105,3 +105,22 @@ O orcamento ja consumido continua consumido ao retomar. Nao usar `resume` em loo
 Na virada do ano, mantem o corte inicial de 01/01/2025 e continua ate ontem. Os novos meses fechados entram na fila automaticamente; nao precisa trocar o ano em codigo nem carregar novamente todos os anos anteriores.
 
 Uma exportacao pontual de relatorio continua util para investigar divergencias comerciais. Ela nao e mais requisito operacional de cada mes da automacao.
+
+
+## Capacidade acumulada e retomada (12/11/2026)
+
+Por orientacao do usuario, foi retirado o teto acumulado de 50 mil registros em source_records. A previsao informada e inferior a 100 mil registros. Nao foi substituido por outro teto total. Permanecem 50 mil registros por arquivo/job, lotes de ate dois meses, pagina de 50, gate de 1 req/s e 5000 chamadas por job. BASE_ATINGIU_LIMITE_50000_REGISTROS passa a indicar limite do job, nao o tamanho total da base.
+
+Classificacao do banco usa registros normalizados diretamente, indices por ID de atendimento e candidatos de OS por cliente/vinculo/referencia. Gravacoes de fontes e indicadores sao serializadas em blocos de 1000 na mesma transacao; um erro continua desfazendo a publicacao inteira. O lookup da identidade legada usa o indice de chave comercial ja existente. Nao ha migracao nova. A base e os checkpoints nao sao apagados.
+
+API permanece com limite de memoria de 512 MiB; history e automatic passam a 512 MiB (antes 256 e 384). Sao tetos, nao reservas de RAM. A retirada do teto de linhas nao significa memoria ilimitada. O consumo real depende de relatos e vinculos; acompanhar recursos na VPS durante o primeiro mes publicado. Um ensaio sintetico local com 100 mil fontes e relatos de 512 caracteres verifica o classificador, mas nao substitui medir a VPS nem inclui toda a memoria de transporte do PostgreSQL/publicacao.
+
+Esta alteracao integra a branch da recuperacao de enderecos. Depois de commit/push/merge, construir API/web e recriar API, web e automatic conforme o procedimento usual, com parada breve do worker e os checkpoints preservados. O job pausado nao retoma apenas por reconstruir a imagem: apos confirmar a versao nova, executar:
+
+```bash
+auto resume
+auto status
+dc logs --timestamps --tail=10 automatic
+```
+
+Isso retoma o job salvo, sem criar outro lote ou repetir create/configure. O limite global anterior deixa de impedir o upsert/publicacao; todas as demais validacoes continuam e podem apontar outra pendencia real. Nao limpar paginas, caches, tabelas ou volume do PostgreSQL. A recuperacao de bairros tem comandos separados em LOCALIDADES.md e nao exige reiniciar a importacao historica.

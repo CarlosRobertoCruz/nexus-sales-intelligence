@@ -3,7 +3,7 @@ import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReac
 import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
 import { canonicalLocation, locationInAddress } from "../../../core/config/commercialLocations";
 import { recognizeCommercialPlan } from "../../../core/config/commercialPlans";
-import { buildCancellationDetail } from "./cancellationDetails";
+import { createCancellationDetailBuilder } from "./cancellationDetails";
 import { extractCancellationReason } from "./cancellationReason";
 
 type RowRecord = Readonly<Record<string, SpreadsheetCell>>;
@@ -404,18 +404,41 @@ export function classifyCommercialRows(
   attendance: ImportedWorksheet,
   serviceOrders: ImportedWorksheet,
 ): ClassifiedCommercialImport {
-  const rawAttendanceRows = deduplicateRows(rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos").filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
+  return classifyCommercialRecordRows(
+    rowsFromWorksheet(attendance, REQUIRED_ATTENDANCE_HEADERS, "atendimentos"),
+    rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço"),
+    attendance.fileName,serviceOrders.fileName,
+  );
+}
+
+// The database already stores normalized records. Avoid an entire spreadsheet round trip.
+export function classifyCommercialRecordRows(
+  attendanceRecords: ReadonlyArray<RowRecord>,
+  serviceOrderRecords: ReadonlyArray<RowRecord>,
+  attendanceFileName="Base central",
+  serviceOrderFileName="Base central",
+): ClassifiedCommercialImport {
+  const rawAttendanceRows = deduplicateRows(attendanceRecords.filter((row) => /^\d+$/.test(text(row, "protocolo"))), "protocolo");
   const contextRows=rawAttendanceRows.filter(row=>text(row,"publication_scope")==="installation_context");
   const reportedRows=rawAttendanceRows.filter(row=>text(row,"publication_scope")!=="installation_context");
   const discardedDrafts=reportedRows.filter(isDiscardedDraft);
   const attendanceRows=reportedRows.filter(row=>!isDiscardedDraft(row));
-  const osRows = deduplicateRows(rowsFromWorksheet(serviceOrders, REQUIRED_OS_HEADERS, "ordens de serviço").filter((row) => /^\d+$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
+  const osRows = deduplicateRows(serviceOrderRecords.filter((row) => /^\d+$/.test(text(row, "numero_ordem_servico"))), "numero_ordem_servico");
   if (!attendanceRows.length) throw new Error("Nenhum atendimento válido foi encontrado no arquivo selecionado.");
   if (!osRows.length) throw new Error("Nenhuma ordem de serviço válida foi encontrada no arquivo selecionado.");
 
   // Preserve the raw volume; checklists cannot supply links or commercial evidence.
   const commercialOsRows = osRows.filter(row => !isChecklistOrder(row));
   const orders = orderIndex(commercialOsRows);
+  const cancellationDetail=createCancellationDetailBuilder(commercialOsRows);
+  const installationAttendances=[...attendanceRows,...contextRows];
+  const attendanceById=new Map<string,RowRecord[]>();
+  for(const row of installationAttendances) {
+    const id=text(row,"id_atendimento");
+    if(!id)continue;
+    const group=attendanceById.get(id);
+    if(group)group.push(row);else attendanceById.set(id,[row]);
+  }
   const sales: ClassifiedSale[] = [];
   const renewals: ClassifiedRenewal[] = [];
   const cancellations: ClassifiedCancellation[] = [];
@@ -472,7 +495,7 @@ export function classifyCommercialRows(
         reasonLabel: reason.label,
         location: locationFromAttendance(row, linkedOrder, combined),
         completed: true,
-        detail: buildCancellationDetail(row, commercialOsRows),
+        detail: cancellationDetail(row),
       });
       classifiedProtocols.add(protocol);
     }
@@ -481,7 +504,7 @@ export function classifyCommercialRows(
 
   for (const linkedOrder of orders.all) {
     if (!isCompletedInstallationOrder(linkedOrder) || !linkedOrder.executionFinishedAt) continue;
-    const row = attendanceForInstallationOrder(linkedOrder, [...attendanceRows,...contextRows]);
+    const row = attendanceForInstallationOrder(linkedOrder, linkedOrder.attendanceId ? attendanceById.get(linkedOrder.attendanceId)??[] : installationAttendances);
     if (!row) continue;
     const combined = installationText(row);
     const commercialDate = linkedOrder.executionFinishedAt;
@@ -539,8 +562,8 @@ export function classifyCommercialRows(
   warnings.push("A venda exige um atendimento de instalação anterior e uma OS de instalação finalizada, com início e término executados válidos. O atendimento identifica a atendente e a execução da OS define o mês comercial. Renovações e cancelamentos são classificados pelo atendimento; reativações, pelo tipo da OS.");
 
   return {
-    attendanceFileName: attendance.fileName,
-    serviceOrderFileName: serviceOrders.fileName,
+    attendanceFileName,
+    serviceOrderFileName,
     attendanceRows: attendanceRows.length,
     serviceOrderRows: osRows.length,
     linkedServiceOrders,

@@ -41,7 +41,7 @@ services:
     <<: *api
     profiles: [tools]
     restart: "no"
-    mem_limit: 256m
+    mem_limit: 512m
     cpus: 0.5
     entrypoint: [node, server/jobs/import-year.mjs]
     command: [help]
@@ -49,7 +49,7 @@ services:
     <<: *api
     profiles: [automation]
     restart: unless-stopped
-    mem_limit: 384m
+    mem_limit: 512m
     cpus: 0.5
     entrypoint: [node, server/jobs/automatic-sync.mjs]
     command: [run]

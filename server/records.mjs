@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { classifyCommercialRows } from "../server-dist/commercial.js";
+import { classifyCommercialRecordRows } from "../server-dist/commercial.js";
 export const KINDS = [
   "attendance",
   "serviceOrders",
@@ -8,7 +8,9 @@ export const KINDS = [
   "cancellations",
   "reactivations",
 ];
+// Per-file/job protections stay at 50k; cumulative database storage has no row-count ceiling.
 export const MAX_ROWS = 50000;
+const WRITE_BATCH_ROWS = 1000;
 const keys = { attendance: "protocolo", serviceOrders: "numero_ordem_servico" };
 const norm = (s) =>
   String(s ?? "")
@@ -93,7 +95,7 @@ export async function upsertRows(db, kind, records, source) {
     const businessKey=String(payload[keys[kind]]);
     const upstream=payload[idField];
     if(upstream!==undefined && !/^\d{1,40}$/.test(String(upstream))) throw new Error("IDENTIFICADOR_INVALIDO");
-    const existing=(await db.query(`SELECT id,payload FROM source_records WHERE kind=$1 AND payload->>$2=$3`,[kind,keys[kind],businessKey])).rows;
+    const existing=(await db.query(`SELECT id,payload FROM source_records WHERE kind=$1 AND (CASE WHEN kind='attendance' THEN payload->>'protocolo' ELSE payload->>'numero_ordem_servico' END)=$2`,[kind,businessKey])).rows;
     if(existing.length>1) throw new Error("IDENTIDADE_LEGADA_AMBIGUA");
     const canonical=upstream!==undefined ? "hubsoft:"+String(upstream) : existing[0]?.id??businessKey;
     if(upstream!==undefined && existing[0] && existing[0].id!==canonical) {
@@ -104,7 +106,7 @@ export async function upsertRows(db, kind, records, source) {
   }
   // Same business record from a spreadsheet and from Hubsoft has the same key.
   const unique = [...new Map(values.map((v) => [v.id, v])).values()];
-  await db.query(
+  for(let offset=0;offset<unique.length;offset+=WRITE_BATCH_ROWS)await db.query(
     `INSERT INTO source_records(kind,id,payload,source)
  SELECT $1,r.id,r.payload,$3 FROM jsonb_to_recordset($2::jsonb) AS r(id text,payload jsonb)
  ON CONFLICT(kind,id) DO UPDATE SET
@@ -115,6 +117,17 @@ export async function upsertRows(db, kind, records, source) {
      WHEN excluded.payload->>'publication_scope'='installation_context'
        AND COALESCE(source_records.payload->>'publication_scope','published')='published'
      THEN source_records.payload
+     WHEN source_records.kind='serviceOrders'
+       AND source_records.payload->'location_recovery'->>'source'='hubsoft_exact_service_current_installation_address'
+       AND NOT (excluded.payload ? 'deleted_at' AND COALESCE(excluded.payload->>'deleted_at','')<>'')
+       AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['id_ordem_servico','numero_ordem_servico','id_atendimento','codigo_cliente','data_inicio_executado','data_termino_executado']) AS identity_field(name)
+         WHERE COALESCE(excluded.payload->>name,'')='' OR excluded.payload->>name IS DISTINCT FROM source_records.payload->>name)
+       AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['bairro','cidade','id_cliente_servico']) AS geo_field(name)
+         WHERE COALESCE(excluded.payload->>name,'')<>'' AND excluded.payload->>name IS DISTINCT FROM source_records.payload->>name)
+     THEN excluded.payload || jsonb_build_object(
+       'bairro',source_records.payload->>'bairro','cidade',source_records.payload->>'cidade',
+       'id_cliente_servico',source_records.payload->>'id_cliente_servico',
+       'location_recovery',source_records.payload->'location_recovery')
      ELSE excluded.payload
    END,
    source=CASE
@@ -127,13 +140,8 @@ export async function upsertRows(db, kind, records, source) {
      ELSE excluded.source
    END,
    updated_at=now()`,
-    [kind, JSON.stringify(unique), source],
+    [kind, JSON.stringify(unique.slice(offset,offset+WRITE_BATCH_ROWS)), source],
   );
-  const count = Number(
-    (await db.query("SELECT count(*) AS count FROM source_records")).rows[0]
-      .count,
-  );
-  if (count > MAX_ROWS) throw new Error("BASE_ATINGIU_LIMITE_50000_REGISTROS");
 }
 
 // Versões antigas da sincronização pontual usavam a mesma tabela da base
@@ -152,39 +160,11 @@ export async function quarantineLegacyManualRows(db) {
   }), {});
 }
 
-function worksheet(records, kind) {
-  const required =
-    kind === "attendance"
-      ? [
-          "protocolo",
-          "nome_razaosocial",
-          "descricao_abertura",
-          "data_cadastro",
-          "usuario_abertura",
-          "status",
-          "tipo_atendimento",
-        ]
-      : [
-          "numero_ordem_servico",
-          "tipo_ordem_servico",
-          "status",
-          "data_inicio_programado",
-          "data_inicio_executado",
-          "data_termino_executado",
-        ];
-  const headers = [
-    ...new Set([...required, ...records.flatMap((r) => Object.keys(r))]),
-  ];
-  return {
-    fileName: "Base central",
-    rows: [headers, ...records.map((r) => headers.map((k) => r[k] ?? null))],
-  };
-}
 export function classifyStoredRows(raw) {
   const a=raw.filter(row=>row.kind==='attendance').map(row=>row.payload);
   const o=raw.filter(row=>row.kind==='serviceOrders').map(row=>row.payload);
   if(!a.some(row=>row.publication_scope!=='installation_context')||!o.length)return null;
-  return classifyCommercialRows(worksheet(a,'attendance'),worksheet(o,'serviceOrders'));
+  return classifyCommercialRecordRows(a,o);
 }
 export async function rebuild(db) {
   const raw = (
@@ -207,17 +187,15 @@ export async function rebuild(db) {
   }
   await db.query("DELETE FROM commercial_records");
   for (const kind of KINDS) {
-    const records = classified[kind].map((r) => ({
-      id: r.businessKey ?? r.id,
-      event_date: r.date.toISOString(),
-      payload: r,
-    }));
-    if (records.length)
+    const events=classified[kind];
+    for(let offset=0;offset<events.length;offset+=WRITE_BATCH_ROWS) {
+      const records=events.slice(offset,offset+WRITE_BATCH_ROWS).map(r=>({id:r.businessKey??r.id,event_date:r.date.toISOString(),payload:r}));
       await db.query(
         `INSERT INTO commercial_records(kind,id,event_date,payload)
    SELECT $1,r.id,r.event_date,r.payload FROM jsonb_to_recordset($2::jsonb) AS r(id text,event_date timestamptz,payload jsonb)`,
         [kind, JSON.stringify(records)],
       );
+    }
   }
   await db.query(
     `INSERT INTO application_settings(key,value) VALUES('quality',$1::jsonb) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
