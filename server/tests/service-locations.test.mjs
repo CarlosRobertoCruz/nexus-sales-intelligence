@@ -31,6 +31,10 @@ function client(response={}) {
     if(u.pathname.endsWith('/cliente')) {
       if(response.failClientOnce){response.failClientOnce=false;return Response.json({}, {status:429});}
       const cancelled=u.searchParams.get('cancelado')==='sim';
+      // Model the real API: installation addresses are an explicitly requested relation.
+      const includeAddress=u.searchParams.get('relacoes')==='endereco_instalacao';
+      if(!includeAddress)return Response.json({clientes:[{codigo_cliente:'12',servicos:services().map(({endereco_instalacao:_address,...service})=>service)}]});
+      if(response.omitAddressOnce){response.omitAddressOnce=false;return Response.json({clientes:[{codigo_cliente:'12',servicos:services().map(({endereco_instalacao:_address,...service})=>service)}]});}
       if(response.emptyActive&&!cancelled)return Response.json({clientes:[]});
       return Response.json({clientes:[{codigo_cliente:response.clientCode??'12',senha:'NAO_PERSISTIR',servicos:cancelled?(response.cancelled??services()):(response.services??services())}]});
     }
@@ -70,6 +74,7 @@ test('consulta cliente usa codigo exato, limit=1, sem redirects e retorna soment
   assert.equal(request.url.searchParams.get('busca'),'codigo_cliente');assert.equal(request.url.searchParams.get('termo_busca'),'12');
   assert.equal(request.url.searchParams.get('limit'),'1');assert.equal(request.url.searchParams.get('ultima_conexao'),'nao');
   assert.equal(request.url.searchParams.get('incluir_contrato'),'nao');
+  assert.equal(request.url.searchParams.get('relacoes'),'endereco_instalacao');
   await assert.rejects(api.clientInstallationServices('nome'),/CLIENTE_INVALIDO/);
   await assert.rejects(api.request('POST','/api/v1/integracao/cliente',{}),/BLOQUEADO/);
 });
@@ -192,5 +197,22 @@ test('nova sincronizacao sem geografia conserva evidencia somente para a mesma O
     await upsertRows(db,'serviceOrders',[{...normalized('serviceOrders',{...order,servico:{id_cliente_servico:'98'}}),data_referencia_bi:'data_termino_executado'}],'hubsoft');
     source=(await query("SELECT payload FROM source_records WHERE kind='serviceOrders'")).rows[0].payload;
     assert.equal(source.id_cliente_servico,'98');assert.equal(source.location_recovery,undefined);assert.equal(source.bairro,'');
+  }finally{await pg.close();}
+});
+
+
+test('endereco omitido preserva identidade e retomada captura a relacao sem repetir protocolo',async()=>{
+  const {db,query,pg}=await database();const {api,calls}=client({omitAddressOnce:true});
+  try {
+    const before=await rows(query);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/LOCALIDADE_ENDERECO_NAO_RETORNADO/);
+    assert.equal((await planServiceLocations(db,'2026-10')).readyForReview,0);
+    assert.deepEqual(await rows(query),before);
+    const result=await captureServiceLocations(db,api,'2026-10',{env});
+    assert.equal(result.captured,1);assert.equal(result.callsThisRun,1);assert.equal(result.callsReserved,4);
+    assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length,1);
+    assert.ok(calls.filter(call=>call.url.pathname.endsWith('/cliente')).every(call=>call.url.searchParams.get('relacoes')==='endereco_instalacao'));
+    assert.deepEqual((await planServiceLocations(db,'2026-10')).readyByLocation,[{location:'Muriqui',sales:1}]);
+    assert.deepEqual(await rows(query),before);
   }finally{await pg.close();}
 });
