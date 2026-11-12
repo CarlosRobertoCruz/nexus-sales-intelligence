@@ -33,3 +33,47 @@ dc run --rm --no-deps --entrypoint node history server/jobs/rebuild-locations.mj
 `apply` disputa sem espera o lock compartilhado com o coletor. Se retornar `SINCRONIZACAO_EM_ANDAMENTO`, não houve aplicação; tente depois de concluir a operação ativa. Não é necessário interromper a coleta para executar a prévia. A aplicação é transacional, registra hashes da evidência no banco e bloqueia qualquer diferença em atributos não geográficos dos indicadores publicados. Localizações publicadas fora dos meses pedidos são preservadas. Reexecuções não duplicam fontes/eventos.
 
 Se o relatório continuar com muitos desconhecidos e nenhum cache aproveitável, o próximo diagnóstico precisa verificar a resposta real da origem por OS/serviço exato. Este patch não adiciona rotas de consulta de cliente nem dispara chamadas adicionais. Não preencher bairro por suposição, nem usar o endereço atual de outro serviço do mesmo cliente como endereço histórico da instalação.
+
+
+## Recuperacao por servico exato (segunda etapa)
+
+O diagnostico real de outubro/2026 encontrou 35 vendas com OS, atendimento e codigo do cliente, mas sem bairro e sem ID de servico normalizado. Isso nao comprova ausencia do endereco na Hubsoft. A documentacao do atendimento retorna `servico.id_cliente_servico`, agora lido e preservado; o cadastro do cliente retorna `servicos[].endereco_instalacao`.
+
+Fontes oficiais: [atendimento](https://github.com/hubsoftbrasil/api/blob/master/docs/source/clientes/atendimento.rst) e [consulta de cliente](https://github.com/hubsoftbrasil/api/blob/master/docs/source/clientes/consulta.rst).
+
+O novo comando e separado do reparo offline. Nao e iniciado por deploy, navegador ou worker automatico. Exige imagem nova da API e worker com o mesmo codigo. Nao ha migracao. A base nao tem teto acumulado por quantidade de linhas (50 mil por arquivo/lote permanecem); esta recuperacao atualiza fontes existentes, sem inserir outros atendimentos/OS.
+
+Na VPS, comece pela previa rapida (somente leitura, sem reclassificar a base inteira):
+
+```bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2026-10
+```
+
+Depois, o primeiro teste captura somente o que couber em quatro chamadas totais, incluindo eventual OAuth. Nao publica indicadores:
+
+```bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs capture 2026-10 4
+```
+
+Uma captura consulta o protocolo exato ja vinculado a venda, valida atendimento, cliente, OS, numero e execucao, extrai o ID do servico, e consulta o cliente por codigo exato com limit=1. Dentre os servicos desse cliente, aceita somente o ID comprovado. Consulta o filtro de cancelados apenas se o ID nao apareceu no filtro inicial. Nunca escolhe o primeiro servico nem usa endereco de cobranca/fiscal. A resposta do cliente e reduzida imediatamente a ID, bairro e cidade; contatos, senhas e enderecos completos nao sao persistidos nem impressos.
+
+Exige HUBSOFT_HISTORY_IP_COORDINATED=true, habilitacao historica ou automatica existente, e gate compartilhado de 1 req/s. Cada comando aceita de 4 a 100 chamadas, com teto persistido de 500 por escopo (um ou dois meses explicitos desde janeiro/2025). A reserva ocorre antes do envio, incluindo falhas e OAuth. 429 respeita cooldown; falhas interrompem a execucao. Identidades e evidencias concluidas ficam em checkpoints, evitando repetir protocolos apos interrupcao. O lock compartilhado evita concorrencia com captura/publicacao; ocupado retorna SINCRONIZACAO_EM_ANDAMENTO sem novas chamadas.
+
+Se o piloto funcionar, continuar o mesmo escopo com ate 100 chamadas por execucao e conferir novamente:
+
+```bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs capture 2026-10 100
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2026-10
+```
+
+**Limitacao historica:** o cadastro mostra o endereco de instalacao atual daquele servico, observado no momento da consulta. Nao comprova que o endereco nunca mudou desde a venda. A evidencia registra essa origem e data; a publicacao exige aceitar explicitamente essa base de endereco. Se a gestao exigir endereco imutavel na data da venda, manter a evidencia para conferencia e obter a fonte historica, sem executar apply.
+
+Para aplicar as evidencias validas apos essa conferencia:
+
+```bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs apply 2026-10 --accept-current-service-address
+```
+
+A aplicacao e transacional, verifica se a fonte mudou desde a captura, atualiza somente geografia/ID do servico da OS existente e o campo location da venda correspondente. IDs, datas, planos, atendentes, quantidades e outros meses permanecem intactos. Cidade/bairro existentes divergentes bloqueiam a aplicacao. Ha auditoria com hashes; reexecutar nao duplica eventos. O resultado real da primeira captura deve ser conferido antes de prometer que todos os 35 casos serao recuperados.
+
+Uma listagem futura sem geografia preserva a evidencia recuperada somente quando IDs da OS/atendimento/cliente, numero da OS, execucao e eventual servico continuam iguais. Endereco ou servico explicito divergente nao herda a geografia anterior. Assim, o proximo rebuild nao apaga silenciosamente a recuperacao por receber uma resposta mais pobre.

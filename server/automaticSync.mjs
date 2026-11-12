@@ -68,13 +68,14 @@ export async function publishAutomaticMonth(pool,id) {
         const day=localDay(r.kind==='attendance'?r.payload.data_cadastro:r.payload.data_termino_executado,r.kind!=='attendance');
         if(day<m.startDate||(r.origin!=='context'&&day>m.cutoff)) fail('REGISTRO_FORA_DO_ESCOPO_AUTOMATICO');
       }
+      const capturedIdentities=new Set(records.map(record=>`${record.kind}:${record.upstream_id}`));
       const existing=(await db.query(`SELECT kind,id,payload FROM source_records WHERE
         COALESCE(payload->>'publication_scope','published')='published' AND id LIKE 'hubsoft:%'`)).rows;
       for(const r of existing) {
         const date=r.kind==='attendance'?r.payload.data_cadastro:r.payload.data_termino_executado;
         if(!date||!days.has(localDay(date,r.kind!=='attendance'))) continue;
         const id=exactId(r.payload[r.kind==='attendance'?'id_atendimento':'id_ordem_servico']);
-        if(!records.some(record=>record.kind===r.kind&&record.upstream_id===id)) fail('REGISTRO_PUBLICADO_AUSENTE_NA_API');
+        if(!capturedIdentities.has(`${r.kind}:${id}`)) fail('REGISTRO_PUBLICADO_AUSENTE_NA_API');
       }
       const at=new Date().toISOString();
       for(const kind of ['attendance','serviceOrders']) await upsertRows(db,kind,records.filter(r=>r.kind===kind).map(r=>({...r.payload,

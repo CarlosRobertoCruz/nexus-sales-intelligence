@@ -1,8 +1,10 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { retryDelay, safePolicy } from "./hubsoftGate.mjs";
+import {extractLocationFields,serviceIdentity} from "./locationFields.mjs";
 const READ_PATHS = new Set([
   "/api/v1/integracao/atendimento/todos",
   "/api/v1/integracao/cliente/atendimento",
+  "/api/v1/integracao/cliente",
   "/api/v1/integracao/ordem_servico/todos",
 ]);
 export class HubsoftError extends Error {
@@ -57,7 +59,12 @@ export class HubsoftClient {
     )
       throw new HubsoftError("URL_HUBSOFT_INVALIDA");
     const url = new URL(path, base);
-    if (method === "GET" && path === "/api/v1/integracao/cliente/atendimento") {
+    if(method==="GET"&&path==="/api/v1/integracao/cliente") {
+      if(typeof body.clientCode!=="string"||!/^\d{1,40}$/.test(body.clientCode)||typeof body.cancelled!=="boolean")
+        throw new HubsoftError("CLIENTE_INVALIDO");
+      url.search=new URLSearchParams({busca:"codigo_cliente",termo_busca:body.clientCode,limit:"1",
+        cancelado:body.cancelled?"sim":"nao",ultima_conexao:"nao",incluir_contrato:"nao"}).toString();
+    } else if (method === "GET" && path === "/api/v1/integracao/cliente/atendimento") {
       if (body.clientCode !== undefined) {
         if (!/^\d{1,40}$/.test(String(body.clientCode))) throw new HubsoftError("CLIENTE_INVALIDO");
         validateDay(body.day);
@@ -188,6 +195,27 @@ export class HubsoftClient {
       return data.atendimentos;
     });
     this.queue=task.catch(()=>{}); return task;
+  }
+  clientInstallationServices(clientCode,cancelled=false) {
+    const task=this.queue.then(async()=>{
+      if(typeof clientCode!=="string"||!/^\d{1,40}$/.test(clientCode)||typeof cancelled!=="boolean")throw new HubsoftError("CLIENTE_INVALIDO");
+      await this.authenticate();
+      const data=await this.request("GET","/api/v1/integracao/cliente",{clientCode,cancelled},this.token);
+      if(Array.isArray(data.clientes)&&data.clientes.length===0)return [];
+      if(!Array.isArray(data.clientes)||data.clientes.length!==1||String(data.clientes[0]?.codigo_cliente)!==clientCode)
+        throw new HubsoftError("HUBSOFT_CLIENTE_DIVERGENTE");
+      const services=data.clientes[0].servicos;
+      if(!Array.isArray(services)||services.length>50)throw new HubsoftError("HUBSOFT_SERVICOS_INVALIDOS");
+      const ids=new Set();
+      return services.map(service=>{
+        const id=serviceIdentity(service);
+        if(!id||ids.has(id))throw new HubsoftError("HUBSOFT_SERVICOS_INVALIDOS");
+        ids.add(id);
+        // Return only installation geography, never contact details, passwords or billing addresses.
+        return {id_cliente_servico:id,...extractLocationFields({endereco_instalacao:service.endereco_instalacao})};
+      });
+    });
+    this.queue=task.catch(()=>{});return task;
   }
   attendanceDetail(protocol) {
     const task=this.queue.then(async()=>{

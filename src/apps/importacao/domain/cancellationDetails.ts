@@ -57,3 +57,28 @@ export function buildCancellationDetail(attendance: Row, orders: ReadonlyArray<R
     orders: matches.slice(0, 5).map(record => record.item),
   };
 }
+
+
+// Select the same candidate superset as the detail rules without scanning all OS per cancellation.
+export function createCancellationDetailBuilder(orders: ReadonlyArray<Row>) {
+  const byCode=new Map<string,number[]>(),byParent=new Map<string,number[]>(),byNumber=new Map<string,number[]>();
+  const append=(map:Map<string,number[]>,key:string,index:number)=>{
+    if(!key)return;
+    const group=map.get(key);if(group)group.push(index);else map.set(key,[index]);
+  };
+  orders.forEach((row,index)=>{
+    append(byCode,value(row,"codigo_cliente"),index);
+    append(byParent,value(row,"id_atendimento"),index);
+    append(byNumber,value(row,"numero_ordem_servico"),index);
+  });
+  return (attendance:Row)=>{
+    const report=value(attendance,"descricao_fechamento")||value(attendance,"descricao_abertura");
+    const reference=report.match(/ordem de servi[cç]o(?: de)?\s*(?:n[ºo°.]*\s*)?(\d+)/i)?.[1]??"";
+    const indices=new Set([
+      ...byCode.get(value(attendance,"codigo_cliente"))??[],
+      ...byParent.get(value(attendance,"id_atendimento"))??[],
+      ...byNumber.get(reference)??[],
+    ]);
+    return buildCancellationDetail(attendance,[...indices].sort((a,b)=>a-b).map(index=>orders[index]));
+  };
+}

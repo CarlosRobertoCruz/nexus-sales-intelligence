@@ -7,11 +7,13 @@ export function geographicText(value) {
   return text.length<=160&&!/^(?:|nao informad[oa]|sem bairro|sem cidade|n\/?a|-|\d+)$/.test(key)?text:'';
 }
 export function serviceIdentity(row) {
-  const value=row?.id_cliente_servico ?? row?.cliente_servico?.id_cliente_servico;
-  if(value===undefined||value===null||value==='')return '';
-  if(typeof value==='number'&&!Number.isSafeInteger(value)||!/^\d{1,40}$/.test(String(value)))
+  const values=[row?.id_cliente_servico,row?.cliente_servico?.id_cliente_servico,row?.servico?.id_cliente_servico]
+    .filter(value=>value!==undefined&&value!==null&&value!=='');
+  for(const value of values)if(typeof value==='number'&&!Number.isSafeInteger(value)||!/^\d{1,40}$/.test(String(value)))
     throw Object.assign(new Error('IDENTIFICADOR_INVALIDO'),{code:'IDENTIFICADOR_INVALIDO'});
-  return String(value);
+  const ids=new Set(values.map(String));
+  if(ids.size>1)throw Object.assign(new Error('HUBSOFT_SERVICO_DIVERGENTE'),{code:'HUBSOFT_SERVICO_DIVERGENTE'});
+  return [...ids][0]??'';
 }
 export function extractLocationFields(row) {
   const addresses=[row,row?.endereco_instalacao,row?.cliente_servico?.endereco_instalacao,
