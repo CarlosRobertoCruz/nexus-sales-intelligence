@@ -77,3 +77,10 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 A aplicacao e transacional, verifica se a fonte mudou desde a captura, atualiza somente geografia/ID do servico da OS existente e o campo location da venda correspondente. IDs, datas, planos, atendentes, quantidades e outros meses permanecem intactos. Cidade/bairro existentes divergentes bloqueiam a aplicacao. Ha auditoria com hashes; reexecutar nao duplica eventos. O resultado real da primeira captura deve ser conferido antes de prometer que todos os 35 casos serao recuperados.
 
 Uma listagem futura sem geografia preserva a evidencia recuperada somente quando IDs da OS/atendimento/cliente, numero da OS, execucao e eventual servico continuam iguais. Endereco ou servico explicito divergente nao herda a geografia anterior. Assim, o proximo rebuild nao apaga silenciosamente a recuperacao por receber uma resposta mais pobre.
+
+
+## Relacao de endereco na consulta de cliente (12/11/2026)
+
+O piloto encontrou o servico exato, mas a resposta veio sem qualquer campo de endereco. A consulta agora solicita explicitamente relacoes=endereco_instalacao, conforme a [documentacao oficial atual](https://docs.hubsoft.com.br/#52a7bdc7-2583-45e9-b2e2-ca1f5796f7b0). Nao ampliar para senhas, parametros ou outros enderecos. O teste HTTP simula a ausencia da relacao quando nao solicitada.
+
+Depois do merge, reconstruir a imagem API e recriar API/automatic com a mesma versao. Nao exige migracao nem rebuild do web. Repetir o piloto capture 2026-10 4 com o coletor parado brevemente e religa-lo ao terminar, inclusive em caso de erro. A identidade ja validada fica no checkpoint: a retomada nao repete o protocolo, preserva o orcamento consumido e nao publica nada. Conferir plan antes de continuar. Se LOCALIDADE_ENDERECO_NAO_RETORNADO persistir, nao presumir que e apenas grafia nem repetir capturas em loop; verificar a resposta real da relacao solicitada.
