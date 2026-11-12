@@ -1,3 +1,4 @@
+import { canonicalLocation } from "../../../core/config/commercialLocations";
 import type { CommercialDataLedger } from "@/apps/importacao/types/spreadsheetImport";
 import type { CommercialLocationMetric } from "../types/locations";
 
@@ -6,8 +7,7 @@ function inMonth(date: Date, periodKey: string): boolean {
 }
 
 function normalizedLocation(location: string | undefined): string {
-  const value = location?.trim();
-  return value && value !== "Não informada" ? value : "Localidade não informada";
+  return canonicalLocation(location) ?? "Localidade não informada";
 }
 
 export function buildLocationMetrics(ledger: CommercialDataLedger, periodKey: string): ReadonlyArray<CommercialLocationMetric> {
