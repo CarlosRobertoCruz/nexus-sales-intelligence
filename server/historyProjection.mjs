@@ -1,3 +1,4 @@
+import {extractLocationFields,projectInstallationAddress,serviceIdentity} from './locationFields.mjs';
 // Somente campos usados pelo adaptador e pela reconciliação entram no staging.
 // Não guardar CPF, email, telefone, credenciais, parâmetros livres ou payload arbitrário.
 export function projectHistoryRecord(row,embedded=true) {
@@ -14,9 +15,15 @@ export function projectHistoryRecord(row,embedded=true) {
   if(row.cliente_servico) result.cliente_servico={cliente:row.cliente_servico.cliente?{codigo_cliente:row.cliente_servico.cliente.codigo_cliente,nome_razaosocial:row.cliente_servico.cliente.nome_razaosocial}:undefined,
     endereco_instalacao:projectAddress(row.cliente_servico.endereco_instalacao)};
   if(row.endereco_instalacao) result.endereco_instalacao=projectAddress(row.endereco_instalacao);
+  const geo=extractLocationFields(row);
+  for(const field of ['bairro','cidade']) {
+    if(geo[field]||row[field]!==undefined)result[field]=geo[field];
+  }
+  const serviceId=serviceIdentity(row);
+  if(serviceId)result.id_cliente_servico=serviceId;
   if(row.atendimento) result.atendimento={id_atendimento:row.atendimento.id_atendimento,protocolo:row.atendimento.protocolo};
   if(Array.isArray(row.atendimento_mensagem)) result.atendimento_mensagem=row.atendimento_mensagem.map(m=>({mensagem:m.mensagem,descricao:m.descricao}));
   if(embedded&&Array.isArray(row.ordens_servico)) result.ordens_servico=row.ordens_servico.map(os=>projectHistoryRecord(os,false));
   return result;
 }
-function projectAddress(address) { return address?{bairro:address.bairro,cidade:address.cidade,endereco_numero:address.endereco_numero?{bairro:address.endereco_numero.bairro,cidade:address.endereco_numero.cidade?{nome:address.endereco_numero.cidade.nome}:undefined}:undefined}:undefined; }
+function projectAddress(address) { return projectInstallationAddress(address); }

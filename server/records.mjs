@@ -180,15 +180,20 @@ function worksheet(records, kind) {
     rows: [headers, ...records.map((r) => headers.map((k) => r[k] ?? null))],
   };
 }
+export function classifyStoredRows(raw) {
+  const a=raw.filter(row=>row.kind==='attendance').map(row=>row.payload);
+  const o=raw.filter(row=>row.kind==='serviceOrders').map(row=>row.payload);
+  if(!a.some(row=>row.publication_scope!=='installation_context')||!o.length)return null;
+  return classifyCommercialRows(worksheet(a,'attendance'),worksheet(o,'serviceOrders'));
+}
 export async function rebuild(db) {
   const raw = (
     await db.query(`SELECT kind,payload FROM source_records
       WHERE COALESCE(payload->>'publication_scope','published') <> 'manual_staging'
       ORDER BY kind,id`)
   ).rows;
-  const a = raw.filter((r) => r.kind === "attendance").map((r) => r.payload),
-    o = raw.filter((r) => r.kind === "serviceOrders").map((r) => r.payload);
-  if (!a.some(row=>row.publication_scope!=='installation_context') || !o.length) {
+  const classified=classifyStoredRows(raw);
+  if (!classified) {
     // Never keep stale metrics after the upstream deletes the final source records.
     const previous = Number(
       (await db.query("SELECT count(*) AS count FROM commercial_records"))
@@ -200,10 +205,6 @@ export async function rebuild(db) {
       warnings: ["Importe atendimentos e OS para gerar indicadores."],
     };
   }
-  const classified = classifyCommercialRows(
-    worksheet(a, "attendance"),
-    worksheet(o, "serviceOrders"),
-  );
   await db.query("DELETE FROM commercial_records");
   for (const kind of KINDS) {
     const records = classified[kind].map((r) => ({

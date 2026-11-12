@@ -1,6 +1,7 @@
 import type { RenewalBenefitId, SalesPlanId, SellerId } from "@/core/types/commercialDashboard";
 import type { ClassifiedCancellation, ClassifiedCommercialImport, ClassifiedReactivation, ClassifiedRenewal, ClassifiedSale, ImportedWorksheet, ProcessedAttendance, SpreadsheetCell } from "../types/spreadsheetImport";
 import { COMMERCIAL_SELLERS } from "../../../core/config/commercialSellers";
+import { canonicalLocation, locationInAddress } from "../../../core/config/commercialLocations";
 import { recognizeCommercialPlan } from "../../../core/config/commercialPlans";
 import { buildCancellationDetail } from "./cancellationDetails";
 import { extractCancellationReason } from "./cancellationReason";
@@ -15,6 +16,7 @@ type ServiceOrder = {
   type: string;
   status: string;
   location: string;
+  city: string;
   executionStartedAt: Date | null;
   executionFinishedAt: Date | null;
   scheduledAt: Date | null;
@@ -255,42 +257,20 @@ function validAddressPart(value: string): string {
   return normalized && !/^(?:n\/?a|nao informad[oa]|-|sem bairro)$/.test(normalized) ? value.trim() : "";
 }
 
-function locationFromAttendance(row: RowRecord, order: ServiceOrder | undefined, combinedText: string): string {
-  const neighborhood = validAddressPart(text(row, "bairro"));
-  if (neighborhood) return neighborhood;
+function locationFromRow(row: RowRecord): string | undefined {
+  const city=validAddressPart(text(row,"cidade"));
+  const neighborhood=canonicalLocation(validAddressPart(text(row,"bairro")),city);
+  if(neighborhood)return neighborhood;
+  const address=[text(row,"endereco"),text(row,"complemento"),text(row,"referencia")].filter(Boolean).join(" ");
+  return locationInAddress(address,city,true);
+}
 
-  const address = normalize([
-    text(row, "endereco"),
-    text(row, "complemento"),
-    text(row, "referencia"),
-  ].filter(Boolean).join(" "));
-  const known = [
-    "Conceição de Jacareí",
-    "Itacuruçá",
-    "Praia Grande",
-    "Praia Pequena",
-    "Praia Brava",
-    "Praia do Saco",
-    "Praia do Apara",
-    "Vila Muriqui",
-    "Muriqui",
-    "Serra do Piloto",
-    "Sahy",
-    "Ibicuí",
-    "Junqueira",
-    "Parque Bela Vista",
-    "Bela Vista",
-    "Mangaratiba",
-  ];
-  const addressLocation = known.find((location) => address.includes(normalize(location)));
-  if (addressLocation) return addressLocation;
-
-  if (order?.location) return order.location;
-  const city = validAddressPart(text(row, "cidade"));
-  if (city) return city;
-
-  const normalizedText = normalize(combinedText);
-  return known.find((location) => normalizedText.includes(normalize(location))) ?? "Não informada";
+function locationFromAttendance(row: RowRecord, order: ServiceOrder | undefined, combinedText: string, preferOrder=false): string {
+  const sameCustomer=!order?.customerCode||!text(row,"codigo_cliente")||order.customerCode===text(row,"codigo_cliente");
+  const orderLocation=sameCustomer?canonicalLocation(order?.location):undefined;
+  if(preferOrder&&orderLocation)return orderLocation;
+  return locationFromRow(row)??orderLocation??locationInAddress(combinedText,text(row,"cidade"))
+    ??(sameCustomer?canonicalLocation(order?.city):undefined)??canonicalLocation(validAddressPart(text(row,"cidade")))??"Não informada";
 }
 
 function isChecklistOrder(row: RowRecord): boolean {
@@ -314,7 +294,10 @@ function orderIndex(rows: ReadonlyArray<RowRecord>): ServiceOrderIndex {
       ticketIds: extractTicketIds(`${text(row, "descricao_abertura")} ${text(row, "descricao_servico")} ${text(row, "descricao_fechamento")}`),
       type: text(row, "tipo_ordem_servico"),
       status: text(row, "status"),
-      location: text(row, "bairro") || text(row, "cidade"),
+      location: locationFromRow(row)
+        ??locationInAddress([text(row,"descricao_abertura"),text(row,"descricao_servico"),text(row,"descricao_fechamento")].join("\n"),text(row,"cidade"))
+        ??"",
+      city: canonicalLocation(validAddressPart(text(row,"cidade")))??"",
       executionStartedAt: parseDate(row.data_inicio_executado),
       executionFinishedAt: parseDate(row.data_termino_executado),
       scheduledAt: parseDate(row.data_inicio_programado),
@@ -515,7 +498,7 @@ export function classifyCommercialRows(
       planLabel: plan.label,
       sellerId: seller.id,
       sellerName: seller.name,
-      location: locationFromAttendance(row, linkedOrder, combined),
+      location: locationFromAttendance(row, linkedOrder, combined, true),
       installed: true,
       withdrawn: false,
     });

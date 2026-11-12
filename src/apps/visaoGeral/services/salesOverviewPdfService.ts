@@ -593,7 +593,7 @@ function drawVectorMap(doc: PdfDocument, locations: ReadonlyArray<MappedCommerci
   text(doc, "Posições proporcionais às coordenadas cadastradas", x + 3, y + height - 3, 5.8, COLORS.muted);
 }
 
-function drawMapPage(doc: PdfDocument, locations: ReadonlyArray<MappedCommercialLocation>, metric: LocationMetricId, label: string, color: Rgb, updatedAt: string, referenceMonth: string, page: number, pages: number, mapImage?: string): void {
+function drawMapPage(doc: PdfDocument, locations: ReadonlyArray<MappedCommercialLocation>, metric: LocationMetricId, label: string, color: Rgb, updatedAt: string, referenceMonth: string, page: number, pages: number, mapImage?: string, unmapped=0): void {
   beginPage(doc, `Mapa de ${label.toLowerCase()}`, `Distribuição territorial por ${label.toLowerCase()}`, referenceMonth);
   card(doc, PAGE.margin, 31, 213, 157);
   if (mapImage) doc.addImage(mapImage, "JPEG", PAGE.margin + 2, 33, 209, 153, undefined, "FAST");
@@ -612,7 +612,8 @@ function drawMapPage(doc: PdfDocument, locations: ReadonlyArray<MappedCommercial
     ink(doc, color);
     doc.text(String(item[metric]), 277, rowY, { align: "right" });
   });
-  if (!ranked.length) text(doc, "Sem registros no período", 235, 58, 7.2, COLORS.muted);
+  if (!ranked.length) text(doc, "Sem localidades mapeadas", 235, 58, 7.2, COLORS.muted);
+  if(unmapped>0)fitText(doc, `Sem posição no mapa: ${unmapped}`, 235, 182, 44, 6.4, COLORS.muted);
   finishPage(doc, updatedAt, page, pages);
 }
 
@@ -682,7 +683,9 @@ export async function generateCommercialReportPdf(report: CommercialReportData):
   }
   mapSpecs.forEach((spec, index) => {
     doc.addPage("a4", "landscape");
-    drawMapPage(doc, mappedLocations, spec.metric, spec.label, spec.color, data.updatedAt, data.referenceMonth, 6 + index, pages, mapImages[spec.metric]);
+    const total=report.locationMetrics.reduce((sum,item)=>sum+item[spec.metric],0);
+    const mapped=mappedLocations.reduce((sum,item)=>sum+item[spec.metric],0);
+    drawMapPage(doc, mappedLocations, spec.metric, spec.label, spec.color, data.updatedAt, data.referenceMonth, 6 + index, pages, mapImages[spec.metric],total-mapped);
   });
 
   const filename = `nexus-sales-intelligence-relatorio-completo-${safeFilename(data.referenceMonth || "relatorio")}.pdf`;

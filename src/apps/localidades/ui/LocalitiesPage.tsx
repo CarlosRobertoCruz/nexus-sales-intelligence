@@ -5,7 +5,8 @@ import type { SpreadsheetImportController } from "@/apps/importacao/controller/u
 import { Badge, KpiCard, Row, Select, Stack, Surface, Text } from "@/garden/foundations";
 import { ChartColumnBigIcon, MapPinnedIcon, SalesChartIcon, SparklesIcon } from "@/garden/foundations/assets/icons/icons";
 import { TOKENS } from "@/garden/tokens";
-import { mapCommercialLocations } from "../data/locationCoordinates";
+import { isMissingLocation } from "../../../core/config/commercialLocations";
+import { mapCommercialLocations, normalizeLocationMetrics } from "../data/locationCoordinates";
 import type { LocationMetricId, MappedCommercialLocation } from "../types/locations";
 
 const METRICS: ReadonlyArray<{ value: LocationMetricId; label: string; singular: string; color: string }> = [
@@ -14,7 +15,7 @@ const METRICS: ReadonlyArray<{ value: LocationMetricId; label: string; singular:
   { value: "cancellations", label: "Cancelamentos", singular: "cancelamentos", color: TOKENS.color.feedback.danger },
 ];
 
-function metricValue(location: MappedCommercialLocation, metric: LocationMetricId): number {
+function metricValue(location: {sales:number;renewals:number;cancellations:number}, metric: LocationMetricId): number {
   return location[metric];
 }
 
@@ -79,7 +80,7 @@ function MapView({ locations, metric }: { locations: ReadonlyArray<MappedCommerc
       popupContent.append(title, details);
       if (location.approximate) {
         const note = document.createElement("small");
-        note.textContent = "Posição aproximada pela localidade informada";
+        note.textContent = "Referência regional aproximada; sublocalidades agrupadas";
         popupContent.append(note);
       }
       return new maplibregl.Marker({ element, anchor: "center" })
@@ -93,6 +94,8 @@ function MapView({ locations, metric }: { locations: ReadonlyArray<MappedCommerc
       map.fitBounds(bounds, { padding: 72, maxZoom: 12, duration: 650 });
     } else if (visible[0]) {
       map.easeTo({ center: [visible[0].longitude, visible[0].latitude], zoom: 11.5, duration: 650 });
+    } else {
+      map.easeTo({center:[-44.035,-22.958],zoom:10.4,duration:650});
     }
   }, [locations, metric, metricConfig.color, metricConfig.singular]);
 
@@ -101,9 +104,14 @@ function MapView({ locations, metric }: { locations: ReadonlyArray<MappedCommerc
 
 export function LocalitiesPage({ controller, periodSelector }: { controller: SpreadsheetImportController; periodSelector: ReactNode }) {
   const [metric, setMetric] = useState<LocationMetricId>("sales");
-  const locations = useMemo(() => mapCommercialLocations(controller.locationMetrics), [controller.locationMetrics]);
-  const ranked = useMemo(() => [...locations].sort((a, b) => metricValue(b, metric) - metricValue(a, metric)), [locations, metric]);
-  const total = ranked.reduce((sum, location) => sum + metricValue(location, metric), 0);
+  const normalizedLocations=useMemo(()=>normalizeLocationMetrics(controller.locationMetrics),[controller.locationMetrics]);
+  const locations = useMemo(() => mapCommercialLocations(normalizedLocations), [normalizedLocations]);
+  const ranked = useMemo(() => normalizedLocations.filter(item=>!isMissingLocation(item.location)&&metricValue(item,metric)>0)
+    .sort((a, b) => metricValue(b, metric) - metricValue(a, metric)), [normalizedLocations, metric]);
+  const total = normalizedLocations.reduce((sum, location) => sum + metricValue(location, metric), 0);
+  const mappedTotal=locations.reduce((sum,item)=>sum+metricValue(item,metric),0);
+  const missingTotal=normalizedLocations.filter(item=>isMissingLocation(item.location)).reduce((sum,item)=>sum+metricValue(item,metric),0);
+  const withoutReference=total-mappedTotal-missingTotal;
   const leader = ranked[0];
   const leaderValue = leader ? metricValue(leader, metric) : 0;
   const concentration = total ? Math.round((leaderValue / total) * 100) : 0;
@@ -123,7 +131,7 @@ export function LocalitiesPage({ controller, periodSelector }: { controller: Spr
 
         <section className="kpi-grid" aria-label="Indicadores geográficos">
           <KpiCard label="Localidades ativas" value={String(ranked.filter((location) => metricValue(location, metric) > 0).length)} subLabel={`com ${metricConfig.singular} no período`} icon={<MapPinnedIcon />} iconColor={TOKENS.color.chart.seriesPrimary} iconBg={TOKENS.color.brand.soft} />
-          <KpiCard label={metricConfig.label} value={String(total)} subLabel="registros no mapa" icon={<SalesChartIcon />} iconColor={metricConfig.color} iconBg={TOKENS.color.brand.soft} />
+          <KpiCard label={metricConfig.label} value={String(total)} subLabel="registros no período" icon={<SalesChartIcon />} iconColor={metricConfig.color} iconBg={TOKENS.color.brand.soft} />
           <KpiCard label="Maior concentração" value={leader?.location ?? "Sem dados"} subLabel={`${leaderValue} ${metricConfig.singular}`} icon={<SparklesIcon />} iconColor={TOKENS.color.feedback.warning} iconBg={TOKENS.color.feedback.warningSoft} />
           <KpiCard label="Participação líder" value={`${concentration}%`} subLabel="do volume selecionado" icon={<ChartColumnBigIcon />} iconColor={TOKENS.color.feedback.info} iconBg={TOKENS.color.feedback.infoSoft} />
         </section>
@@ -136,6 +144,11 @@ export function LocalitiesPage({ controller, periodSelector }: { controller: Spr
                 <div style={{ width: 190 }}><Select aria-label="Métrica exibida no mapa" value={metric} onChange={(value) => setMetric(value as LocationMetricId)} options={METRICS.map(({ value, label }) => ({ value, label }))} size="md" weight={600} /></div>
               </Row>
               <MapView locations={locations} metric={metric} />
+              <Text size="sm" tone="muted">{mappedTotal} de {total} {metricConfig.singular} representados por referências regionais aproximadas.</Text>
+              {(missingTotal>0||withoutReference>0)&&<Row gap={TOKENS.spacing[10]} style={{flexWrap:"wrap"}}>
+                {missingTotal>0&&<Badge variant="warning">{missingTotal} sem localidade identificada</Badge>}
+                {withoutReference>0&&<Badge variant="warning">{withoutReference} sem referência cartográfica</Badge>}
+              </Row>}
             </Stack>
           </Surface>
 
@@ -150,7 +163,7 @@ export function LocalitiesPage({ controller, periodSelector }: { controller: Spr
                     <Text size="lg" weight={800}>{metricValue(location, metric)}</Text>
                   </Row>
                 ))}
-                {!ranked.length && <Text size="sm" tone="muted">Importe planilhas com localidades para preencher o mapa.</Text>}
+                {!ranked.length && <Text size="sm" tone="muted">Nenhuma localidade identificada no período selecionado.</Text>}
               </Stack>
             </Stack>
           </Surface>

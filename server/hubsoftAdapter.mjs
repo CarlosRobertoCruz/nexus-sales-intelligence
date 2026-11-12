@@ -1,5 +1,6 @@
 import { HubsoftError } from "./hubsoft.mjs";
 import { HubsoftMappingError, requireHubsoftFields } from "./hubsoftDiagnostics.mjs";
+import { extractLocationFields, serviceIdentity } from './locationFields.mjs';
 import { isAbandonedAttendanceDraft } from "./historyDrafts.mjs";
 function pick(row, ...paths) {
   for (const path of paths) {
@@ -54,22 +55,8 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
       customer = display.name;
     }
   }
-  const location = {
-    bairro: pick(
-      row,
-      "bairro",
-      "endereco_instalacao.bairro",
-      "cliente_servico.endereco_instalacao.bairro",
-      "cliente_servico.endereco_instalacao.endereco_numero.bairro",
-    ),
-    cidade: pick(
-      row,
-      "cidade",
-      "endereco_instalacao.cidade",
-      "cliente_servico.endereco_instalacao.cidade",
-      "cliente_servico.endereco_instalacao.endereco_numero.cidade.nome",
-    ),
-  };
+  const location = extractLocationFields(row);
+  const serviceId = serviceIdentity(row);
   if (kind === "attendance") {
     const protocol = pick(row, "protocolo");
     const messages = Array.isArray(row.atendimento_mensagem)
@@ -123,6 +110,7 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
       tipo_atendimento: type,
       quantidade_os: pick(row, "ordem_servico_count", "quantidade_os"),
       rascunho:abandonedDraft?'sim':'nao',
+      ...(serviceId ? {id_cliente_servico:serviceId} : {}),
       ...location,
     };
   }
@@ -155,6 +143,7 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
     descricao_abertura: pick(row, "descricao_abertura"),
     descricao_servico: pick(row, "descricao_servico"),
     descricao_fechamento: pick(row, "descricao_fechamento"),
+    ...(serviceId ? {id_cliente_servico:serviceId} : {}),
     ...location,
   };
 }
