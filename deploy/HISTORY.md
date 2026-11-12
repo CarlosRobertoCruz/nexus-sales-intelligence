@@ -398,3 +398,24 @@ O usuário informou nova determinação da gestão: incluir também status `Pend
 A pendente mantém `completed=false` na origem derivada e aparece como `Pendente` na lista. Resumo, série mensal, planos, benefícios, equipe e localidades contam todos os eventos de renovação elegíveis, sem filtrar somente os concluídos. Deduplicação por protocolo permanece: resolver uma pendente muda seu status, sem criar um segundo evento. O relatório conferido contém 184 concluídas e 1 pendente, portanto o esperado para outubro passa a 185 após o recálculo com a nova regra, sem constante ou ajuste manual de contagem.
 
 O deploy continua exigindo API e web e o recálculo transacional dos indicadores. A inclusão da pendente não exige consulta à Hubsoft se o registro já está publicado. Os registros históricos e os avisos de pendência são preservados.
+## Retomada automatica de julho/2026: rascunho sem cliente (12/11/2026)
+
+O job `594818bf-5c7a-4c1e-a474-c00ec6350fc4` pausou com
+`IDENTIFICADOR_INVALIDO` na pagina 0 de atendimentos de 24/07/2026.
+O atendimento 231161 foi confirmado no snapshot como rascunho abandonado,
+sem cliente e com quantidade de OS igual a zero. A validacao exigia cliente
+antes de aplicar a exclusao ja existente para rascunhos.
+
+No modo automatic, rascunhos explicitamente vazios sao normalizados como
+`discarded_draft` antes do enriquecimento. O snapshot original permanece;
+ID, protocolo e data continuam obrigatorios. Cliente/autor ausentes ficam
+vazios, sem valores ficticios. Descricao de fechamento, mensagens com conteudo
+ou OS capturadas impedem essa excecao, mesmo com contagem declarada zero.
+Os rascunhos preservados ficam fora dos indicadores e da revisao de pendencias.
+Atendimentos operacionais sem cliente continuam bloqueando a coleta.
+
+Nao ha migracao de banco nem necessidade de refazer meses ou apagar caches.
+Apos merge e deploy da imagem da API e do worker automatic, usar
+`automatic-sync.mjs resume` para retomar o mesmo checkpoint. Conferir a imagem
+do worker e o status antes/depois. Esta alteracao local nao executa retomada
+nem muda o estado da VPS.

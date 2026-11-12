@@ -7,7 +7,7 @@ import { validateManifest,monthsFor,daysFor,exactId,localDay,nextWindowAt,usesPr
 import { upsertRows,rebuild } from './records.mjs';
 import { projectHistoryRecord } from './historyProjection.mjs';
 import {orderDate,stageFollowups,publishFollowups} from './historyFollowup.mjs';
-import {markCapturedDrafts} from './historyDrafts.mjs';
+import {markCapturedDrafts,isAbandonedAttendanceDraft} from './historyDrafts.mjs';
 const codeError=code=>Object.assign(new Error(code),{code});
 const streams=['attendance','attendanceChanges','serviceOrders','serviceOrderCompletions'];
 
@@ -130,6 +130,14 @@ export async function historyStep(pool,client,id) {
           } else if(!selectedDays.has(date)) continue;
         } else if(kind==='serviceOrders' && m.osDateField==='data_termino_executado') throw codeError('HUBSOFT_OS_CONCLUSAO_AUSENTE');
         if(raw.deleted_at) throw codeError('EXCLUSAO_EXIGE_RECONCILIACAO');
+        // Preserve the captured identity as audit-only before customer enrichment.
+        // A blank customer alone never establishes that an attendance is a draft.
+        if(m.phase==='automatic'&&kind==='attendance'&&isAbandonedAttendanceDraft(raw)) {
+          exactId(raw.id_atendimento);exactId(raw.protocolo);
+          const row=normalized(kind,raw,{allowIncompleteBusinessFields:true});
+          rows.push({kind,payload:row,origin:'direct'});
+          continue;
+        }
         let detail=null,cache=null;
         let needsDetail=kind==='attendance' && (Boolean(m.followupCutoff)||m.phase==='automatic');
         if(kind==='attendance'&&!needsDetail) {
