@@ -96,15 +96,18 @@ export function normalizeHubsoft(kind, row, userNames = {}, { requireScheduled =
       "tipo_atendimento",
     );
     const date = diagnosticDate(kind, "data_cadastro", pick(row, "data_cadastro_br", "data_cadastro"));
+    // Audit-only abandoned drafts may have neither customer nor opening user.
+    // Identity/protocol/date remain required; operational attendances stay strict.
+    const abandonedDraft=allowIncompleteBusinessFields&&isAbandonedAttendanceDraft(row);
     requireHubsoftFields("HUBSOFT_ATENDIMENTO_CAMPOS_INSUFICIENTES", kind, {
-      protocolo: protocol, nome_razaosocial: customer,
+      protocolo: protocol,
+      ...(!abandonedDraft ? {nome_razaosocial:customer} : {}),
       ...(!allowIncompleteBusinessFields ? {descricao_abertura:description} : {}),
-      usuario_abertura: user,
+      ...(!abandonedDraft ? {usuario_abertura:user} : {}),
       ...(!allowIncompleteBusinessFields ? {tipo_atendimento:type} : {}),
       data_cadastro: date,
     }, ["protocolo"]);
     const missingBusinessFields=Object.entries({descricao_abertura:description,tipo_atendimento:type}).filter(([,value])=>!value).map(([field])=>field);
-    const abandonedDraft=isAbandonedAttendanceDraft(row);
     return {
       ...(abandonedDraft?{classification_status:'discarded_draft',classification_reason:'abandoned_draft'}:
         allowIncompleteBusinessFields&&missingBusinessFields.length?{classification_status:'incomplete',quality_missing_fields:missingBusinessFields.join(',')}:{}),

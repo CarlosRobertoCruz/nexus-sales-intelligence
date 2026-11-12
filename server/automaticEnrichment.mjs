@@ -36,6 +36,7 @@ export async function automaticEnrichmentStep(db,client,job,month) {
   if(job.manifest.mode==='daily') {
     const pending=(await db.query(`SELECT payload FROM source_records WHERE kind='attendance'
       AND COALESCE(payload->>'publication_scope','published')='published'
+      AND COALESCE(payload->>'classification_status','')<>'discarded_draft'
       AND id LIKE 'hubsoft:%' AND payload->>'id_atendimento' IS NOT NULL
       AND lower(payload->>'status') IN ('pendente','aguardando','em andamento','aberto')
       AND substring(payload->>'data_cadastro',7,4)||'-'||substring(payload->>'data_cadastro',4,2)||'-'||substring(payload->>'data_cadastro',1,2)>=$1

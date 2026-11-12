@@ -15,7 +15,10 @@ export function isAbandonedAttendanceDraft(row) {
   const quantity=text(row?.ordem_servico_count??row?.quantidade_os);
   return isAffirmative(row?.rascunho)
     && !text(row?.descricao_abertura)
+    && !text(row?.descricao_fechamento)
     && !typeText(row?.tipo_atendimento)
+    && (!Array.isArray(row?.ordens_servico)||row.ordens_servico.length===0)
+    && (!Array.isArray(row?.atendimento_mensagem)||!row.atendimento_mensagem.some(message=>text(message?.mensagem)||text(message?.descricao)))
     && /^0+(?:\.0+)?$/.test(quantity);
 }
 
