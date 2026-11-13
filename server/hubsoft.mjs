@@ -63,7 +63,7 @@ export class HubsoftClient {
       if(typeof body.clientCode!=="string"||!/^\d{1,40}$/.test(body.clientCode)||typeof body.cancelled!=="boolean")
         throw new HubsoftError("CLIENTE_INVALIDO");
       url.search=new URLSearchParams({busca:"codigo_cliente",termo_busca:body.clientCode,limit:"1",
-        cancelado:body.cancelled?"sim":"nao",ultima_conexao:"nao",incluir_contrato:"nao",relacoes:"endereco_instalacao"}).toString();
+        cancelado:body.cancelled?"sim":"nao",inativo:"todos",ultima_conexao:"nao",incluir_contrato:"nao",relacoes:"endereco_instalacao"}).toString();
     } else if (method === "GET" && path === "/api/v1/integracao/cliente/atendimento") {
       if (body.clientCode !== undefined) {
         if (!/^\d{1,40}$/.test(String(body.clientCode))) throw new HubsoftError("CLIENTE_INVALIDO");

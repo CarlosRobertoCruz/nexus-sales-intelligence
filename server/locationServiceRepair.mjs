@@ -8,6 +8,8 @@ import {locationRepairMonths} from './locationRecovery.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const MAX_CALLS=500;
+const LOOKUP_VERSION='all_customer_statuses_v1';
+const pendingKey=target=>`location_service_pending:${target.month}:${target.id}`;
 const key=target=>`location_service_evidence:${target.month}:${target.id}`;
 const identityKey=target=>`location_service_identity:${target.month}:${target.id}`;
 const activeMissKey=target=>`location_service_active_miss:${target.month}:${target.id}`;
@@ -52,9 +54,16 @@ function checkedEvidence(target,evidence) {
   if(current&&current!==evidence.id_cliente_servico)fail('HUBSOFT_SERVICO_DIVERGENTE');
   return evidence;
 }
+function checkedPending(target,pending) {
+  if(!pending||pending.lookupVersion!==LOOKUP_VERSION||pending.code!=='LOCALIDADE_SERVICO_NAO_ENCONTRADO'||
+    pending.fingerprint!==signature(target)||!pending.observedAt||!serviceIdentity(pending))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
+  const id=serviceIdentity(target.order)||serviceIdentity(target.attendance);
+  if(id&&id!==pending.id_cliente_servico)fail('HUBSOFT_SERVICO_DIVERGENTE');
+  return pending;
+}
 async function cache(db,list) {
   if(!list.length)return new Map();
-  return new Map((await db.query('SELECT key,value FROM application_settings WHERE key=ANY($1::text[])',[list.flatMap(target=>[key(target),identityKey(target),activeMissKey(target)])])).rows.map(row=>[row.key,row.value]));
+  return new Map((await db.query('SELECT key,value FROM application_settings WHERE key=ANY($1::text[])',[list.flatMap(target=>[key(target),identityKey(target),activeMissKey(target),pendingKey(target)])])).rows.map(row=>[row.key,row.value]));
 }
 async function withLock(pool,work) {
   const db=await pool.connect();let locked=false;
@@ -66,17 +75,21 @@ async function withLock(pool,work) {
 }
 export async function planServiceLocations(db,scope) {
   const months=locationRepairMonths(scope),list=await targets(db,months),saved=await cache(db,list);
-  let ready=0,invalid=0;const byLocation=new Map();
+  let ready=0,invalid=0,unresolved=0;const byLocation=new Map(),byReason=new Map();
   for(const target of list)try{
     validateTarget(target);
     if(saved.has(key(target))){
       const evidence=checkedEvidence(target,saved.get(key(target))),location=canonicalLocation(evidence.bairro,evidence.cidade);
       ready++;byLocation.set(location,(byLocation.get(location)??0)+1);
+    }else if(saved.has(pendingKey(target))){
+      const pending=checkedPending(target,saved.get(pendingKey(target)));unresolved++;
+      byReason.set(pending.code,(byReason.get(pending.code)??0)+1);
     }
   }catch{invalid++;}
   const used=(await db.query('SELECT value FROM application_settings WHERE key=$1',[budgetKey(months)])).rows[0]?.value?.used??0;
   return {months,missingSales:list.length,readyForReview:ready,readyByLocation:[...byLocation].map(([location,sales])=>({location,sales})),invalidEvidenceOrSource:invalid,
-    uncaptured:list.length-ready-invalid,maximumCalls:MAX_CALLS,callsReserved:used,
+    unresolvedSales:unresolved,unresolvedByReason:[...byReason].map(([code,sales])=>({code,sales})),
+    uncaptured:list.length-ready-invalid-unresolved,maximumCalls:MAX_CALLS,callsReserved:used,
     addressBasis:'current_installation_address_of_exact_service',published:false};
 }
 function checkedDetail(target,detail) {
@@ -105,13 +118,13 @@ function sameExecution(stored,observed) {
   const expected=orderDate(stored),actual=orderDate(observed);
   return expected.length===16?actual.slice(0,16)===expected:actual===expected;
 }
-export async function captureServiceLocations(pool,client,scope,{maxCalls=4,env=process.env}={}) {
+export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retryUnresolved=false,env=process.env}={}) {
   const months=locationRepairMonths(scope);
-  if(!Number.isInteger(maxCalls)||maxCalls<4||maxCalls>100)fail('LOCALIDADE_ORCAMENTO_INVALIDO');
+  if(!Number.isInteger(maxCalls)||maxCalls<4||maxCalls>100||typeof retryUnresolved!=='boolean')fail('LOCALIDADE_ORCAMENTO_INVALIDO');
   if(env.HUBSOFT_HISTORY_IP_COORDINATED!=='true'||!(env.HUBSOFT_AUTOMATIC_ENABLED==='true'||env.HUBSOFT_HISTORY_ENABLED==='true')||
     client.gate?.interval!==1000)fail('LOCALIDADE_EXIGE_GATE_COORDENADO_1_REQ_S');
   return withLock(pool,async db=>{
-    const originalGate=client.gate;let calls=0,captured=0,reused=0;
+    const originalGate=client.gate;let calls=0,captured=0,reused=0,unresolved=0;
     const savedBudget=(await db.query('SELECT value FROM application_settings WHERE key=$1',[budgetKey(months)])).rows[0]?.value;
     let used=Number(savedBudget?.used??0);
     if(!Number.isInteger(used)||used<0||used>MAX_CALLS)fail('LOCALIDADE_ORCAMENTO_INVALIDO');
@@ -128,6 +141,11 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,env=
       for(const target of list) {
         validateTarget(target);
         if(saved.has(key(target))){checkedEvidence(target,saved.get(key(target)));reused++;continue;}
+        const pending=saved.get(pendingKey(target));
+        if(pending){
+          checkedPending(target,pending);
+          if(!retryUnresolved){unresolved++;continue;}
+        }
         if(maxCalls-calls<4)break;
         // One protocol plus two client-status queries and a possible OAuth call fit the four-call reservation.
         let identity=saved.get(identityKey(target));
@@ -141,20 +159,29 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,env=
         const id=identity.id_cliente_servico,customer=exactId(target.attendance.codigo_cliente);
         const activeMiss=saved.get(activeMissKey(target));
         if(activeMiss&&(activeMiss.fingerprint!==signature(target)||activeMiss.id_cliente_servico!==id))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
-        let services=activeMiss?[]:await client.clientInstallationServices(customer,false);
+        // An old miss used the active-customer default and cannot exclude the new all-status lookup.
+        const reuseMiss=activeMiss?.lookupVersion===LOOKUP_VERSION&&!pending;
+        let services=reuseMiss?[]:await client.clientInstallationServices(customer,false);
         let matches=services.filter(service=>service.id_cliente_servico===id);
         if(!matches.length){
-          if(!activeMiss)await save(activeMissKey(target),{fingerprint:signature(target),id_cliente_servico:id,observedAt:new Date().toISOString()});
+          if(!reuseMiss)await save(activeMissKey(target),{lookupVersion:LOOKUP_VERSION,fingerprint:signature(target),id_cliente_servico:id,observedAt:new Date().toISOString()});
           services=await client.clientInstallationServices(customer,true);matches=services.filter(service=>service.id_cliente_servico===id);
         }
-        if(matches.length!==1)fail('LOCALIDADE_SERVICO_NAO_ENCONTRADO');
+        if(!matches.length){
+          await save(pendingKey(target),{lookupVersion:LOOKUP_VERSION,code:'LOCALIDADE_SERVICO_NAO_ENCONTRADO',
+            fingerprint:signature(target),id_cliente_servico:id,observedAt:new Date().toISOString()});
+          unresolved++;continue;
+        }
+        if(matches.length!==1)fail('HUBSOFT_SERVICOS_INVALIDOS');
         const {bairro,cidade}=extractLocationFields(matches[0]);
         if(!canonicalLocation(bairro,cidade))fail('LOCALIDADE_ENDERECO_NAO_RETORNADO');
         const evidence={version:1,fingerprint:signature(target),id_cliente_servico:id,bairro,cidade,
           observedAt:new Date().toISOString(),source:'hubsoft_exact_service_current_installation_address'};
-        await save(key(target),evidence);captured++;
+        await save(key(target),evidence);
+        if(pending)await db.query('DELETE FROM application_settings WHERE key=$1',[pendingKey(target)]);
+        captured++;
       }
-      return {months,captured,reused,callsThisRun:calls,callsReserved:used,maximumCalls:MAX_CALLS,published:false};
+      return {months,captured,reused,unresolvedSales:unresolved,callsThisRun:calls,callsReserved:used,maximumCalls:MAX_CALLS,published:false};
     }finally{client.gate=originalGate;}
   });
 }

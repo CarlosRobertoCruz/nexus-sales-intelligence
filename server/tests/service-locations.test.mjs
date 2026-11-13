@@ -27,10 +27,12 @@ function client(response={}) {
   const api=new HubsoftClient(env,async(url,options)=>{
     const u=new URL(url);calls.push({url:u,method:options.method,redirect:options.redirect});
     if(u.pathname==='/oauth/token')return Response.json({access_token:'fake-token',expires_in:3600});
-    if(u.pathname.endsWith('/cliente/atendimento'))return Response.json({atendimentos:[response.detail??detail()]});
+    if(u.pathname.endsWith('/cliente/atendimento'))return Response.json({atendimentos:[response.details?.[u.searchParams.get('termo_busca')]??response.detail??detail()]});
     if(u.pathname.endsWith('/cliente')) {
       if(response.failClientOnce){response.failClientOnce=false;return Response.json({}, {status:429});}
       const cancelled=u.searchParams.get('cancelado')==='sim';
+      if(response.inactiveClient&&u.searchParams.get('inativo')!=='todos')return Response.json({clientes:[]});
+      if(response.failCancelledOnce&&cancelled){response.failCancelledOnce=false;return Response.json({}, {status:429});}
       // Model the real API: installation addresses are an explicitly requested relation.
       const includeAddress=u.searchParams.get('relacoes')==='endereco_instalacao';
       if(!includeAddress)return Response.json({clientes:[{codigo_cliente:'12',servicos:services().map(({endereco_instalacao:_address,...service})=>service)}]});
@@ -75,6 +77,7 @@ test('consulta cliente usa codigo exato, limit=1, sem redirects e retorna soment
   assert.equal(request.url.searchParams.get('limit'),'1');assert.equal(request.url.searchParams.get('ultima_conexao'),'nao');
   assert.equal(request.url.searchParams.get('incluir_contrato'),'nao');
   assert.equal(request.url.searchParams.get('relacoes'),'endereco_instalacao');
+  assert.equal(request.url.searchParams.get('inativo'),'todos');
   await assert.rejects(api.clientInstallationServices('nome'),/CLIENTE_INVALIDO/);
   await assert.rejects(api.request('POST','/api/v1/integracao/cliente',{}),/BLOQUEADO/);
 });
@@ -214,5 +217,89 @@ test('endereco omitido preserva identidade e retomada captura a relacao sem repe
     assert.ok(calls.filter(call=>call.url.pathname.endsWith('/cliente')).every(call=>call.url.searchParams.get('relacoes')==='endereco_instalacao'));
     assert.deepEqual((await planServiceLocations(db,'2026-10')).readyByLocation,[{location:'Muriqui',sales:1}]);
     assert.deepEqual(await rows(query),before);
+  }finally{await pg.close();}
+});
+
+
+test('cliente inativo com servico cancelado e incluido sem ampliar busca por codigo exato',async()=>{
+  const {db,pg}=await database();const {api,calls}=client({inactiveClient:true,emptyActive:true});
+  try {
+    assert.equal((await captureServiceLocations(db,api,'2026-10',{env})).captured,1);
+    const requests=calls.filter(call=>call.url.pathname.endsWith('/cliente'));
+    assert.deepEqual(requests.map(call=>call.url.searchParams.get('cancelado')),['nao','sim']);
+    assert.ok(requests.every(call=>call.url.searchParams.get('inativo')==='todos'&&call.url.searchParams.get('termo_busca')==='12'&&call.url.searchParams.get('limit')==='1'));
+  }finally{await pg.close();}
+});
+
+async function secondSale(db) {
+  const secondAttendance={...attendance,id_atendimento:'102',protocolo:'202610010002'};
+  const secondOrder={...order,id_ordem_servico:'202',numero_ordem_servico:'302',id_atendimento:'102'};
+  await upsertRows(db,'attendance',[normalized('attendance',secondAttendance)],'hubsoft');
+  await upsertRows(db,'serviceOrders',[{...normalized('serviceOrders',secondOrder),data_referencia_bi:'data_termino_executado'}],'hubsoft');
+  await rebuild(db);
+  return {...secondAttendance,servico:{id_cliente_servico:'100'},ordens_servico:[{...secondOrder,servico:{id_cliente_servico:'100'}}]};
+}
+
+test('servico ausente fica pendente, demais vendas avancam e retomada nao repete consultas sem evidencia nova',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const second=await secondSale(db);
+    const response={details:{'202610010002':second},services:[{id_cliente_servico:'100',endereco_instalacao:{bairro:'Praia Grande',cidade:'Mangaratiba'}}],cancelled:[]};
+    const {api,calls}=client(response),before=await rows(query);
+    const result=await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10});
+    assert.equal(result.captured,1);assert.equal(result.unresolvedSales,1);assert.equal(result.callsThisRun,6);
+    const plan=await planServiceLocations(db,'2026-10');
+    assert.equal(plan.readyForReview,1);assert.equal(plan.unresolvedSales,1);assert.equal(plan.uncaptured,0);
+    assert.deepEqual(plan.unresolvedByReason,[{code:'LOCALIDADE_SERVICO_NAO_ENCONTRADO',sales:1}]);
+    assert.deepEqual(plan.readyByLocation,[{location:'Praia Grande',sales:1}]);
+    assert.deepEqual(await rows(query),before);
+    const count=calls.length;
+    const repeated=await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10});
+    assert.equal(repeated.reused,1);assert.equal(repeated.unresolvedSales,1);assert.equal(repeated.callsThisRun,0);assert.equal(calls.length,count);
+    const applied=await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true});
+    assert.equal(applied.updatedSales,1);assert.equal(applied.pendingSales,1);
+    assert.deepEqual(nonGeo(await rows(query)),nonGeo(before));
+    assert.equal((await rows(query)).find(row=>row.payload.id==='hubsoft:201'&&row.kind==='sales').payload.location,'Não informada');
+  }finally{await pg.close();}
+});
+
+test('reconsulta explicita de pendente usa checkpoint e orcamento, encontra somente servico exato e limpa pendencia',async()=>{
+  const {db,query,pg}=await database();const response={services:[services()[0]],cancelled:[]};const {api,calls}=client(response);
+  try {
+    const first=await captureServiceLocations(db,api,'2026-10',{env});
+    assert.equal(first.unresolvedSales,1);assert.equal(first.callsReserved,4);
+    response.services=services();
+    const resumed=await captureServiceLocations(db,api,'2026-10',{env,retryUnresolved:true});
+    assert.equal(resumed.captured,1);assert.equal(resumed.unresolvedSales,0);assert.equal(resumed.callsThisRun,1);assert.equal(resumed.callsReserved,5);
+    assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length,1);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].n,0);
+    assert.equal((await planServiceLocations(db,'2026-10')).readyForReview,1);
+  }finally{await pg.close();}
+});
+
+test('miss legado sem clientes inativos nao impede reconsulta ativa com filtro novo',async()=>{
+  const {db,query,pg}=await database();const response={emptyActive:true,failCancelledOnce:true};const {api,calls}=client(response);
+  try {
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/HUBSOFT_LIMITE_AGUARDE/);
+    await query("UPDATE application_settings SET value=value-'lookupVersion' WHERE key LIKE 'location_service_active_miss:%'");
+    response.emptyActive=false;
+    const count=calls.length;
+    const resumed=await captureServiceLocations(db,api,'2026-10',{env});
+    assert.equal(resumed.captured,1);assert.equal(resumed.callsThisRun,1);assert.equal(resumed.callsReserved,5);
+    assert.equal(calls.slice(count).filter(call=>call.url.pathname.endsWith('/cliente'))[0].url.searchParams.get('cancelado'),'nao');
+    assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length,1);
+  }finally{await pg.close();}
+});
+
+test('pendencia nao autoriza ignorar fonte alterada nem substituir servico por outro',async()=>{
+  const {db,query,pg}=await database();const {api,calls}=client({services:[services()[0]],cancelled:[]});
+  try {
+    await captureServiceLocations(db,api,'2026-10',{env});
+    const count=calls.length;
+    await query("UPDATE source_records SET payload=payload||$1::jsonb WHERE kind='serviceOrders'",[JSON.stringify({id_cliente_servico:'77'})]);
+    const plan=await planServiceLocations(db,'2026-10');assert.equal(plan.invalidEvidenceOrSource,1);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/LOCALIDADE_EVIDENCIA_DIVERGENTE/);
+    assert.equal(calls.length,count);
+    assert.equal((await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true})).updatedSales,0);
   }finally{await pg.close();}
 });
