@@ -84,3 +84,20 @@ Uma listagem futura sem geografia preserva a evidencia recuperada somente quando
 O piloto encontrou o servico exato, mas a resposta veio sem qualquer campo de endereco. A consulta agora solicita explicitamente relacoes=endereco_instalacao, conforme a [documentacao oficial atual](https://docs.hubsoft.com.br/#52a7bdc7-2583-45e9-b2e2-ca1f5796f7b0). Nao ampliar para senhas, parametros ou outros enderecos. O teste HTTP simula a ausencia da relacao quando nao solicitada.
 
 Depois do merge, reconstruir a imagem API e recriar API/automatic com a mesma versao. Nao exige migracao nem rebuild do web. Repetir o piloto capture 2026-10 4 com o coletor parado brevemente e religa-lo ao terminar, inclusive em caso de erro. A identidade ja validada fica no checkpoint: a retomada nao repete o protocolo, preserva o orcamento consumido e nao publica nada. Conferir plan antes de continuar. Se LOCALIDADE_ENDERECO_NAO_RETORNADO persistir, nao presumir que e apenas grafia nem repetir capturas em loop; verificar a resposta real da relacao solicitada.
+
+
+## Clientes inativos e servico historico ausente (13/11/2026)
+
+A consulta pelo codigo exato inclui inativo=todos, alem dos filtros de servicos ativos/cancelados e relacoes=endereco_instalacao. O parametro documentado evita excluir o cadastro de um cliente hoje inativo; nao comprova que esse era o motivo de toda ausencia de servico antigo. Servico migrado/removido pode continuar indisponivel. Nao usar outro contrato ou inferir bairro.
+
+Se as duas respostas validas nao trouxerem o ID comprovado, a captura guarda LOCALIDADE_SERVICO_NAO_ENCONTRADO como pendencia individual e segue para as demais vendas. A previa separa unresolvedSales/unresolvedByReason, uncaptured (ainda por consultar) e readyForReview. uncaptured=0 sozinho nao significa todos recuperados: conferir unresolvedSales. Pendencias permanecem sem localidade, preservam quantidades e nao sao publicadas como evidencias. Falhas HTTP, 429, autenticacao, pagina cheia/servicos excessivos, conflito de identidade ou bairro ausente continuam interrompendo a captura.
+
+Retomadas normais reutilizam evidencias e pendencias, sem novas chamadas para os casos ja esgotados. A ausencia ativa antiga, obtida sem inativo=todos, nao exclui a consulta nova: seu checkpoint e revalidado pela nova versao do filtro. Identidade e orcamento anteriores sao preservados; nao apagar caches nem reiniciar o lote.
+
+Depois de investigar/corrigir a origem, uma reconsulta explicita dos pendentes usa o mesmo orcamento e limite por execucao:
+
+~~~bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs capture 2025-01,2025-02 100 --retry-unresolved
+~~~
+
+Nao executar esse modo em loop. O deploy requer somente nova imagem API e recriacao de API/automatic; sem migracao ou rebuild do web. Para o lote interrompido janeiro/fevereiro de 2025, apos o deploy repetir capture 2025-01,2025-02 100 e plan com o worker parado brevemente na captura e religado ao terminar, inclusive em erro. As quatro evidencias e as treze chamadas ja consumidas permanecem. Conferir a distribuicao antes de aplicar o endereco atual do servico.
