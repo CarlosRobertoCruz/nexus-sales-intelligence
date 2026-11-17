@@ -9,6 +9,9 @@ import {normalized} from '../historyNormalization.mjs';
 import {upsertRows,rebuild} from '../records.mjs';
 import {planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
 
+// Match the API container: source dates without a time use the business calendar.
+process.env.TZ='America/Sao_Paulo';
+
 const env={HUBSOFT_API_URL:'https://example.invalid',HUBSOFT_CLIENT_ID:'fake',HUBSOFT_CLIENT_SECRET:'fake',HUBSOFT_USERNAME:'fake',HUBSOFT_PASSWORD:'fake',
   HUBSOFT_HISTORY_IP_COORDINATED:'true',HUBSOFT_AUTOMATIC_ENABLED:'true'};
 const attendance={id_atendimento:'101',protocolo:'202610010001',codigo_cliente:'12',cliente:{codigo_cliente:'12',nome_razaosocial:'Ficticio'},
@@ -425,5 +428,19 @@ test('all-events conserva orcamento usado por vendas e nao permite reiniciar as 
     assert.equal(calls.length,1);
     const plan=await planServiceLocations(db,'2026-10',{allEvents:true});assert.equal(plan.callsReserved,500);assert.equal(plan.readyForReview,0);
     assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_budget:%'")).rows[0].n,1);
+  }finally{await pg.close();}
+});
+
+
+test('dia realmente divergente no indicador continua bloqueando antes de qualquer consulta',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),{api,calls}=client(fixture);
+    await query("UPDATE commercial_records SET event_date=event_date+interval '1 day' WHERE kind='cancellations'");
+    const before=await rows(query);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.byKind.cancellations.invalid,1);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}),/LOCALIDADE_DATA_DIVERGENTE/);
+    assert.equal(calls.length,0);assert.deepEqual(await rows(query),before);
   }finally{await pg.close();}
 });

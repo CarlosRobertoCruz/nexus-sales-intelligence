@@ -118,3 +118,8 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 Conferir a previa antes da aplicacao. Parar o worker somente na captura/aplicacao e religa-lo ao terminar, inclusive em erro. Enderecos sao atuais do servico exato, nao prova historica imutavel. O mesmo teto persistido de 500 inclui TODAS as categorias e as chamadas de vendas ja consumidas; --all-events nao cria outro orcamento. Pode nao caber todo o lote; nesse caso preservar checkpoints e reportar a pendencia, sem zerar contadores nem trocar escopo para contornar o teto. Os meses com vendas ja aplicadas ainda podem ter renovacoes/cancelamentos a recuperar.
 
 Deploy: construir imagem API e recriar API/automatic, sem migracao nem rebuild do web. Nenhuma nova captura e iniciada automaticamente por esse deploy.
+
+
+## Fuso da validacao automatica (17/11/2026)
+
+O workflow e o teste de reparo usam explicitamente TZ=America/Sao_Paulo, igual ao Dockerfile e compose da API/worker. As datas de atendimento sem horario sao datas do calendario comercial. Em um runner UTC, gerar o indicador com meia-noite local e depois conferir o dia em Sao Paulo deslocava o dia e produzia LOCALIDADE_DATA_DIVERGENTE nos cinco testes novos; a falha foi reproduzida com TZ=UTC. A regra de validacao nao foi relaxada: um teste separado continua recusando um dia efetivamente diferente antes de qualquer chamada. Essa correcao nao exige alterar a VPS, banco ou dados.
