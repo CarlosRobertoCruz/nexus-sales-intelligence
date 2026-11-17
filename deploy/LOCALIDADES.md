@@ -101,3 +101,25 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 ~~~
 
 Nao executar esse modo em loop. O deploy requer somente nova imagem API e recriacao de API/automatic; sem migracao ou rebuild do web. Para o lote interrompido janeiro/fevereiro de 2025, apos o deploy repetir capture 2025-01,2025-02 100 e plan com o worker parado brevemente na captura e religado ao terminar, inclusive em erro. As quatro evidencias e as treze chamadas ja consumidas permanecem. Conferir a distribuicao antes de aplicar o endereco atual do servico.
+
+
+## Tres movimentos no mesmo reparo (17/11/2026)
+
+O opt-in --all-events inclui vendas, renovacoes e cancelamentos publicados e sem localidade. Sem a flag os comandos existentes continuam somente vendas. As vendas validam OS de instalacao finalizada e pai exato; renovacoes/cancelamentos validam o atendimento pelo protocolo, ID nativo, cliente, dia e ID do servico. Nao exigem OS de instalacao. Ausencia de servico comprovado fica como LOCALIDADE_SERVICO_NAO_IDENTIFICADO, sem adivinhar contrato.
+
+plan mostra missingEvents e byKind (missing, ready, invalid, unresolved, uncaptured), alem dos totais por tipo. apply registra updatedSales, updatedRenewals e updatedCancellations. Somente location e os campos geograficos/servico/proveniencia da fonte sao atualizados. Cancelamentos mantem motivo, desfecho e relatos; renovacoes mantem status/beneficios; nenhum novo evento e classificado. A geografia recuperada do atendimento sobrevive a uma listagem futura vazia somente com as mesmas identidades e sem novo servico/endereco divergente.
+
+~~~bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2025-09,2025-10 --all-events
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs capture 2025-09,2025-10 100 --all-events
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs apply 2025-09,2025-10 --all-events --accept-current-service-address
+~~~
+
+Conferir a previa antes da aplicacao. Parar o worker somente na captura/aplicacao e religa-lo ao terminar, inclusive em erro. Enderecos sao atuais do servico exato, nao prova historica imutavel. O mesmo teto persistido de 500 inclui TODAS as categorias e as chamadas de vendas ja consumidas; --all-events nao cria outro orcamento. Pode nao caber todo o lote; nesse caso preservar checkpoints e reportar a pendencia, sem zerar contadores nem trocar escopo para contornar o teto. Os meses com vendas ja aplicadas ainda podem ter renovacoes/cancelamentos a recuperar.
+
+Deploy: construir imagem API e recriar API/automatic, sem migracao nem rebuild do web. Nenhuma nova captura e iniciada automaticamente por esse deploy.
+
+
+## Fuso da validacao automatica (17/11/2026)
+
+O workflow e o teste de reparo usam explicitamente TZ=America/Sao_Paulo, igual ao Dockerfile e compose da API/worker. As datas de atendimento sem horario sao datas do calendario comercial. Em um runner UTC, gerar o indicador com meia-noite local e depois conferir o dia em Sao Paulo deslocava o dia e produzia LOCALIDADE_DATA_DIVERGENTE nos cinco testes novos; a falha foi reproduzida com TZ=UTC. A regra de validacao nao foi relaxada: um teste separado continua recusando um dia efetivamente diferente antes de qualquer chamada. Essa correcao nao exige alterar a VPS, banco ou dados.

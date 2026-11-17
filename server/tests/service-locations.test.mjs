@@ -9,6 +9,9 @@ import {normalized} from '../historyNormalization.mjs';
 import {upsertRows,rebuild} from '../records.mjs';
 import {planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
 
+// Match the API container: source dates without a time use the business calendar.
+process.env.TZ='America/Sao_Paulo';
+
 const env={HUBSOFT_API_URL:'https://example.invalid',HUBSOFT_CLIENT_ID:'fake',HUBSOFT_CLIENT_SECRET:'fake',HUBSOFT_USERNAME:'fake',HUBSOFT_PASSWORD:'fake',
   HUBSOFT_HISTORY_IP_COORDINATED:'true',HUBSOFT_AUTOMATIC_ENABLED:'true'};
 const attendance={id_atendimento:'101',protocolo:'202610010001',codigo_cliente:'12',cliente:{codigo_cliente:'12',nome_razaosocial:'Ficticio'},
@@ -301,5 +304,143 @@ test('pendencia nao autoriza ignorar fonte alterada nem substituir servico por o
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/LOCALIDADE_EVIDENCIA_DIVERGENTE/);
     assert.equal(calls.length,count);
     assert.equal((await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true})).updatedSales,0);
+  }finally{await pg.close();}
+});
+
+
+async function attendanceEvents(db,{missingCancellationService=false,conflictingRenewalCity=false}={}) {
+  const renewal={...attendance,id_atendimento:'103',protocolo:'202610030001',data_cadastro:'03/10/2026',
+    tipo_atendimento:'RENOVAÇÃO DE CONTRATO',descricao_abertura:'Renovação 600 Mega Combo Plus',status:'Pendente',id_cliente_servico:'88',
+    ...(conflictingRenewalCity?{cidade:'Angra dos Reis'}:{})};
+  const cancellation={...attendance,id_atendimento:'104',protocolo:'202610040001',data_cadastro:'04/10/2026',
+    tipo_atendimento:'CANCELAMENTO',descricao_abertura:'Pedido de cancelamento por mudança.',descricao_fechamento:'Cancelamento realizado.',
+    ...(!missingCancellationService?{id_cliente_servico:'101'}:{})};
+  await upsertRows(db,'attendance',[normalized('attendance',renewal),normalized('attendance',cancellation)],'hubsoft');
+  await rebuild(db);
+  const details={
+    [renewal.protocolo]:{...renewal,servico:{id_cliente_servico:'88'},ordens_servico:[]},
+    [cancellation.protocolo]:{...cancellation,...(!missingCancellationService?{servico:{id_cliente_servico:'101'}}:{}),ordens_servico:[]}
+  };
+  const serviceList=[...services(),{id_cliente_servico:'101',endereco_instalacao:{bairro:'Praia do Saco',cidade:'Mangaratiba'}}];
+  return {renewal,cancellation,details,services:serviceList};
+}
+
+test('all-events recupera venda, renovacao pendente e cancelamento sem OS, reutiliza venda e preserva todos os atributos comerciais',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),{api,calls}=client(fixture),before=await rows(query);
+    const original=await planServiceLocations(db,'2026-10');
+    assert.equal(original.missingEvents,1);assert.equal(original.missingRenewals,0);
+    await captureServiceLocations(db,api,'2026-10',{env});
+    const previousCalls=calls.length;
+    const captured=await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true});
+    assert.equal(captured.captured,2);assert.equal(captured.reused,1);assert.equal(captured.callsReserved,7);
+    assert.equal(calls.slice(previousCalls).filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length,2);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.missingEvents,3);assert.equal(plan.readyForReview,3);assert.equal(plan.uncaptured,0);
+    assert.deepEqual(Object.values(plan.byKind).map(item=>item.ready),[1,1,1]);
+    assert.deepEqual(plan.byKind.renewals.readyByLocation,[{location:'Ibicuí',events:1}]);
+    assert.equal(plan.byKind.cancellations.ready,1);
+    assert.deepEqual(await rows(query),before);
+    assert.equal((await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true})).updatedSales,1);
+    // Legacy apply affects sales only; combined apply later handles just the remaining movements.
+    assert.equal((await rows(query)).find(row=>row.kind==='renewals').payload.location,'Não informada');
+    const applied=await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true});
+    assert.equal(applied.updatedEvents,2);assert.equal(applied.updatedSales,0);assert.equal(applied.updatedRenewals,1);assert.equal(applied.updatedCancellations,1);
+    assert.equal(applied.pendingEvents,0);assert.deepEqual(nonGeo(await rows(query)),nonGeo(before));
+    const after=await rows(query);
+    assert.equal(after.find(row=>row.kind==='renewals').payload.location,'Ibicuí');
+    assert.equal(after.find(row=>row.kind==='renewals').payload.completed,false);
+    assert.equal(after.find(row=>row.kind==='cancellations').payload.location,'Praia do Saco');
+    assert.equal((await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true})).updatedEvents,0);
+    assert.equal((await planServiceLocations(db,'2026-10',{allEvents:true})).missingEvents,0);
+    const saved=(await query("SELECT value FROM application_settings WHERE key LIKE 'location_service_%'")).rows;
+    assert.equal(JSON.stringify(saved).includes('NAO_PERSISTIR'),false);
+  }finally{await pg.close();}
+});
+
+test('geografia dos atendimentos sobrevive a nova listagem vazia e nao herda servico explicito diferente',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),{api}=client(fixture);
+    await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true});
+    await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true});
+    await upsertRows(db,'attendance',[normalized('attendance',fixture.renewal),normalized('attendance',fixture.cancellation)],'hubsoft');
+    await rebuild(db);
+    const restored=await rows(query);
+    assert.equal(restored.find(row=>row.kind==='renewals').payload.location,'Ibicuí');
+    assert.equal(restored.find(row=>row.kind==='cancellations').payload.location,'Praia do Saco');
+    await upsertRows(db,'attendance',[normalized('attendance',{...fixture.renewal,id_cliente_servico:'999'})],'hubsoft');
+    const source=(await query("SELECT payload FROM source_records WHERE kind='attendance' AND id='hubsoft:103'")).rows[0].payload;
+    assert.equal(source.id_cliente_servico,'999');assert.equal(source.location_recovery,undefined);assert.equal(source.bairro,'');
+  }finally{await pg.close();}
+});
+
+test('atendimento sem servico comprovado fica pendente sem consultar contratos por tentativa',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db,{missingCancellationService:true}),{api,calls}=client(fixture),before=await rows(query);
+    const capture=await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true});
+    assert.equal(capture.unresolvedEvents,1);assert.equal(capture.unresolvedSales,0);assert.equal(capture.captured,2);
+    assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente')).length,2);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.byKind.cancellations.unresolved,1);assert.equal(plan.uncaptured,0);
+    assert.deepEqual(plan.unresolvedByReason,[{code:'LOCALIDADE_SERVICO_NAO_IDENTIFICADO',events:1}]);
+    assert.deepEqual(await rows(query),before);
+    const count=calls.length;await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true});assert.equal(calls.length,count);
+    const applied=await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true});
+    assert.equal(applied.updatedCancellations,0);assert.equal(applied.pendingCancellations,1);
+  }finally{await pg.close();}
+});
+
+test('atendimento divergente em cliente, dia ou servico aborta sem publicar ou usar outro contrato',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),before=await rows(query);
+    for(const change of [{cliente:{codigo_cliente:'98'}},{data_cadastro:'05/10/2026'},{id_cliente_servico:'999',servico:{id_cliente_servico:'999'}}]){
+      const response={...fixture,details:{...fixture.details,[fixture.cancellation.protocolo]:{...fixture.details[fixture.cancellation.protocolo],...change}}};
+      const {api}=client(response);
+      await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}));
+      assert.deepEqual(await rows(query),before);
+    }
+  }finally{await pg.close();}
+});
+
+test('conflito geografico de renovacao faz rollback inclusive do cancelamento anterior na transacao',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db,{conflictingRenewalCity:true}),{api}=client(fixture);
+    // A stale published ledger may still lack geography already present in its source.
+    await query("UPDATE commercial_records SET payload=jsonb_set(payload,'{location}',$1::jsonb) WHERE kind='renewals'",[JSON.stringify('Não informada')]);
+    await captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true});
+    const before=await rows(query),sourceBefore=(await query('SELECT * FROM source_records ORDER BY kind,id')).rows;
+    await assert.rejects(applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true}),/LOCALIDADE_CIDADE_EXISTENTE_DIVERGENTE/);
+    assert.deepEqual(await rows(query),before);assert.deepEqual((await query('SELECT * FROM source_records ORDER BY kind,id')).rows,sourceBefore);
+  }finally{await pg.close();}
+});
+
+test('all-events conserva orcamento usado por vendas e nao permite reiniciar as 500 chamadas',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),{api,calls}=client(fixture);
+    await query("INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)",['location_service_budget:v1:2026-10',JSON.stringify({used:499})]);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}),/LOCALIDADE_ORCAMENTO_ATINGIDO/);
+    assert.equal(calls.length,1);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});assert.equal(plan.callsReserved,500);assert.equal(plan.readyForReview,0);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_budget:%'")).rows[0].n,1);
+  }finally{await pg.close();}
+});
+
+
+test('dia realmente divergente no indicador continua bloqueando antes de qualquer consulta',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db),{api,calls}=client(fixture);
+    await query("UPDATE commercial_records SET event_date=event_date+interval '1 day' WHERE kind='cancellations'");
+    const before=await rows(query);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.byKind.cancellations.invalid,1);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}),/LOCALIDADE_DATA_DIVERGENTE/);
+    assert.equal(calls.length,0);assert.deepEqual(await rows(query),before);
   }finally{await pg.close();}
 });
