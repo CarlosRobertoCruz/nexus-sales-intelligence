@@ -7,7 +7,7 @@ import {extractLocationFields,serviceIdentity} from './locationFields.mjs';
 import {locationRepairMonths} from './locationRecovery.mjs';
 
 const fail=code=>{throw Object.assign(new Error(code),{code});};
-const MAX_CALLS=500;
+const MAX_CALLS=1500;
 const LOOKUP_VERSION='all_customer_statuses_v1';
 const targetKey=target=>target.kind==='sales'?target.id:`${target.kind}:${target.id}`;
 const pendingKey=target=>`location_service_pending:${target.month}:${targetKey(target)}`;
@@ -91,6 +91,33 @@ async function withLock(pool,work) {
     if(!locked)fail('SINCRONIZACAO_EM_ANDAMENTO');
     return await work(db);
   }finally{try{if(locked)await db.query('SELECT pg_advisory_unlock(73190602)');}finally{db.release();}}
+}
+// Inventory reads only published aggregates; it does not capture or publish events.
+export async function inventoryServiceLocations(db,scope) {
+  if(typeof scope!=='string'||!/^\d{4}(,\d{4})?$/.test(scope))fail('LOCALIDADE_ANOS_INVALIDOS');
+  const years=scope.split(',').map(Number);
+  if(years.some(year=>year<2025||year>9998)||years.length===2&&years[1]!==years[0]+1)fail('LOCALIDADE_ANOS_INVALIDOS');
+  const empty=()=>({sales:0,missingSales:0,renewals:0,missingRenewals:0,cancellations:0,missingCancellations:0});
+  const months=new Map(years.flatMap(year=>Array.from({length:12},(_,index)=>{
+    const month=String(year)+'-'+String(index+1).padStart(2,'0');
+    return [month,{month,...empty()}];
+  })));
+  const rows=(await db.query(`SELECT to_char(event_date AT TIME ZONE 'America/Sao_Paulo','YYYY-MM') AS month,
+    kind,payload->>'location' AS location,count(*)::int AS count
+    FROM commercial_records
+    WHERE kind=ANY($3::text[]) AND event_date >= $1::timestamptz AND event_date < $2::timestamptz
+    GROUP BY 1,2,3 ORDER BY 1,2`,
+    [years[0]+'-01-01 00:00:00-03',(years.at(-1)+1)+'-01-01 00:00:00-03',['sales','renewals','cancellations']])).rows;
+  const missingKeys={sales:'missingSales',renewals:'missingRenewals',cancellations:'missingCancellations'};
+  const totals=empty();
+  for(const row of rows){
+    const month=months.get(row.month),count=Number(row.count);
+    month[row.kind]+=count;totals[row.kind]+=count;
+    if(!canonicalLocation(row.location)){
+      month[missingKeys[row.kind]]+=count;totals[missingKeys[row.kind]]+=count;
+    }
+  }
+  return {years,months:[...months.values()],totals,published:false};
 }
 export async function planServiceLocations(db,scope,{allEvents=false}={}) {
   const months=locationRepairMonths(scope),list=await targets(db,months,allEvents),saved=await cache(db,list);

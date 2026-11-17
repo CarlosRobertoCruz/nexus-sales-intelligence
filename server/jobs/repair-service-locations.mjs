@@ -1,9 +1,16 @@
-import {planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
+import {inventoryServiceLocations,planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
 import {locationRepairMonths} from '../locationRecovery.mjs';
 const [action='help',scope,...options]=process.argv.slice(2);
 let pool;
 try {
-  if(action==='help')console.log('Uso: repair-service-locations.mjs plan meses [--all-events] | capture meses [4..100 chamadas] [--all-events] [--retry-unresolved] | apply meses --accept-current-service-address [--all-events]');
+  if(action==='help')console.log('Uso: repair-service-locations.mjs inventory anos (ex.: 2025,2026) | plan meses [--all-events] | capture meses [4..100 chamadas] [--all-events] [--retry-unresolved] | apply meses --accept-current-service-address [--all-events]');
+  else if(action==='inventory') {
+    if(options.length)throw new Error('COMANDO_INVALIDO');
+    ({pool}=await import('../db.mjs'));
+    const result=await inventoryServiceLocations(pool,scope);
+    console.table(result.months);
+    console.log(JSON.stringify({years:result.years,totals:result.totals,published:result.published},null,2));
+  }
   else {
     if(!['plan','capture','apply'].includes(action))throw new Error('COMANDO_INVALIDO');
     locationRepairMonths(scope);
