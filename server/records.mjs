@@ -117,6 +117,17 @@ export async function upsertRows(db, kind, records, source) {
      WHEN excluded.payload->>'publication_scope'='installation_context'
        AND COALESCE(source_records.payload->>'publication_scope','published')='published'
      THEN source_records.payload
+     WHEN source_records.kind='attendance'
+       AND source_records.payload->'location_recovery'->>'source'='hubsoft_exact_service_current_installation_address'
+       AND NOT (excluded.payload ? 'deleted_at' AND COALESCE(excluded.payload->>'deleted_at','')<>'')
+       AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['id_atendimento','protocolo','codigo_cliente','data_cadastro']) AS identity_field(name)
+         WHERE COALESCE(excluded.payload->>name,'')='' OR excluded.payload->>name IS DISTINCT FROM source_records.payload->>name)
+       AND NOT EXISTS (SELECT 1 FROM unnest(ARRAY['bairro','cidade','id_cliente_servico']) AS geo_field(name)
+         WHERE COALESCE(excluded.payload->>name,'')<>'' AND excluded.payload->>name IS DISTINCT FROM source_records.payload->>name)
+     THEN excluded.payload || jsonb_build_object(
+       'bairro',source_records.payload->>'bairro','cidade',source_records.payload->>'cidade',
+       'id_cliente_servico',source_records.payload->>'id_cliente_servico',
+       'location_recovery',source_records.payload->'location_recovery')
      WHEN source_records.kind='serviceOrders'
        AND source_records.payload->'location_recovery'->>'source'='hubsoft_exact_service_current_installation_address'
        AND NOT (excluded.payload ? 'deleted_at' AND COALESCE(excluded.payload->>'deleted_at','')<>'')
