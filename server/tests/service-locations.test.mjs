@@ -7,7 +7,7 @@ import {serviceIdentity} from '../locationFields.mjs';
 import {projectHistoryRecord} from '../historyProjection.mjs';
 import {normalized} from '../historyNormalization.mjs';
 import {upsertRows,rebuild} from '../records.mjs';
-import {planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
+import {inventoryServiceLocations,planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
 
 // Match the API container: source dates without a time use the business calendar.
 process.env.TZ='America/Sao_Paulo';
@@ -159,7 +159,7 @@ test('gate compartilhado, teto persistido, escopo, fonte alterada e limite por e
     await assert.rejects(captureServiceLocations(db,api,'2024-10',{env}));
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:101}));
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env:{...env,HUBSOFT_HISTORY_IP_COORDINATED:'false'}}));
-    await query("INSERT INTO application_settings(key,value) VALUES('location_service_budget:v1:2026-10','{\"used\":500}')");
+    await query("INSERT INTO application_settings(key,value) VALUES('location_service_budget:v1:2026-10','{\"used\":1500}')");
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/ORCAMENTO_ATINGIDO/);assert.equal(calls.length,0);
     await query("DELETE FROM application_settings WHERE key LIKE 'location_service_%'");
     await captureServiceLocations(db,api,'2026-10',{env});
@@ -419,14 +419,14 @@ test('conflito geografico de renovacao faz rollback inclusive do cancelamento an
   }finally{await pg.close();}
 });
 
-test('all-events conserva orcamento usado por vendas e nao permite reiniciar as 500 chamadas',async()=>{
+test('all-events conserva orcamento usado por vendas e nao permite reiniciar as 1500 chamadas',async()=>{
   const {db,query,pg}=await database();
   try {
     const fixture=await attendanceEvents(db),{api,calls}=client(fixture);
-    await query("INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)",['location_service_budget:v1:2026-10',JSON.stringify({used:499})]);
+    await query("INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)",['location_service_budget:v1:2026-10',JSON.stringify({used:1499})]);
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}),/LOCALIDADE_ORCAMENTO_ATINGIDO/);
     assert.equal(calls.length,1);
-    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});assert.equal(plan.callsReserved,500);assert.equal(plan.readyForReview,0);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});assert.equal(plan.callsReserved,1500);assert.equal(plan.readyForReview,0);
     assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_budget:%'")).rows[0].n,1);
   }finally{await pg.close();}
 });
@@ -442,5 +442,49 @@ test('dia realmente divergente no indicador continua bloqueando antes de qualque
     assert.equal(plan.byKind.cancellations.invalid,1);
     await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:10,allEvents:true}),/LOCALIDADE_DATA_DIVERGENTE/);
     assert.equal(calls.length,0);assert.deepEqual(await rows(query),before);
+  }finally{await pg.close();}
+});
+
+
+test('teto ampliado reaproveita contador antigo de 500 e checkpoint sem repetir protocolo',async()=>{
+  const {db,query,pg}=await database();const {api,calls}=client();
+  try {
+    await captureServiceLocations(db,api,'2026-10',{env});
+    const before=await rows(query),protocolCalls=calls.filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length;
+    await query("UPDATE application_settings SET value=$1::jsonb WHERE key=$2",[JSON.stringify({used:500,maximum:500}),'location_service_budget:v1:2026-10']);
+    await query("DELETE FROM application_settings WHERE key LIKE 'location_service_evidence:%'");
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.callsReserved,500);assert.equal(plan.maximumCalls,1500);
+    const result=await captureServiceLocations(db,api,'2026-10',{env,allEvents:true});
+    assert.equal(result.captured,1);assert.equal(result.callsThisRun,1);assert.equal(result.callsReserved,501);assert.equal(result.maximumCalls,1500);
+    assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente/atendimento')).length,protocolCalls);
+    const budgets=(await query("SELECT value FROM application_settings WHERE key LIKE 'location_service_budget:%'")).rows;
+    assert.equal(budgets.length,1);assert.equal(budgets[0].value.used,501);assert.equal(budgets[0].value.maximum,1500);
+    assert.deepEqual(await rows(query),before);
+  }finally{await pg.close();}
+});
+
+test('inventario cobre todos os meses de 2025/2026 e separa totais e localidades pendentes sem alterar dados',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    await query("UPDATE commercial_records SET payload=jsonb_set(payload,'{location}',$1::jsonb)",[JSON.stringify('Não informada')]);
+    const insert=(kind,id,date,location)=>query('INSERT INTO commercial_records(kind,id,event_date,payload) VALUES($1,$2,$3,$4::jsonb)',[kind,id,date,JSON.stringify({id,location})]);
+    await insert('sales','jan-start','2025-01-01T03:00:00Z','Cachoeira');
+    await insert('sales','before-scope','2025-01-01T02:59:59Z','Não informada');
+    await insert('renewals','feb','2025-02-12T15:00:00Z','Não informada');
+    await insert('cancellations','dec-end','2027-01-01T02:59:59Z','Muriqui');
+    await insert('sales','after-scope','2027-01-01T03:00:00Z','Não informada');
+    const before=await rows(query),settings=(await query('SELECT * FROM application_settings')).rows;
+    const result=await inventoryServiceLocations(db,'2025,2026');
+    assert.equal(result.months.length,24);assert.equal(result.months[0].month,'2025-01');assert.equal(result.months.at(-1).month,'2026-12');
+    assert.equal(result.months[0].sales,1);assert.equal(result.months[0].missingSales,0);
+    assert.equal(result.months[1].renewals,1);assert.equal(result.months[1].missingRenewals,1);
+    assert.equal(result.months[2].sales,0);assert.equal(result.months[2].renewals,0);assert.equal(result.months[2].cancellations,0);
+    assert.deepEqual(result.totals,{sales:2,missingSales:1,renewals:1,missingRenewals:1,cancellations:1,missingCancellations:0});
+    assert.equal(result.published,false);
+    assert.equal((await inventoryServiceLocations(db,'2025')).months.length,12);
+    for(const invalid of ['2024','2026,2025','2025,2025','2025,2027','2025,2026,2027','2025-01',undefined])
+      await assert.rejects(inventoryServiceLocations(db,invalid),/LOCALIDADE_ANOS_INVALIDOS/);
+    assert.deepEqual(await rows(query),before);assert.deepEqual((await query('SELECT * FROM application_settings')).rows,settings);
   }finally{await pg.close();}
 });

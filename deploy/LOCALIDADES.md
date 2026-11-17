@@ -57,7 +57,7 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 
 Uma captura consulta o protocolo exato ja vinculado a venda, valida atendimento, cliente, OS, numero e execucao, extrai o ID do servico, e consulta o cliente por codigo exato com limit=1. Dentre os servicos desse cliente, aceita somente o ID comprovado. Consulta o filtro de cancelados apenas se o ID nao apareceu no filtro inicial. Nunca escolhe o primeiro servico nem usa endereco de cobranca/fiscal. A resposta do cliente e reduzida imediatamente a ID, bairro e cidade; contatos, senhas e enderecos completos nao sao persistidos nem impressos.
 
-Exige HUBSOFT_HISTORY_IP_COORDINATED=true, habilitacao historica ou automatica existente, e gate compartilhado de 1 req/s. Cada comando aceita de 4 a 100 chamadas, com teto persistido de 500 por escopo (um ou dois meses explicitos desde janeiro/2025). A reserva ocorre antes do envio, incluindo falhas e OAuth. 429 respeita cooldown; falhas interrompem a execucao. Identidades e evidencias concluidas ficam em checkpoints, evitando repetir protocolos apos interrupcao. O lock compartilhado evita concorrencia com captura/publicacao; ocupado retorna SINCRONIZACAO_EM_ANDAMENTO sem novas chamadas.
+Exige HUBSOFT_HISTORY_IP_COORDINATED=true, habilitacao historica ou automatica existente, e gate compartilhado de 1 req/s. Cada comando aceita de 4 a 100 chamadas, com teto persistido de 1500 por escopo (ampliado com autorizacao em 17/11/2026) (um ou dois meses explicitos desde janeiro/2025). A reserva ocorre antes do envio, incluindo falhas e OAuth. 429 respeita cooldown; falhas interrompem a execucao. Identidades e evidencias concluidas ficam em checkpoints, evitando repetir protocolos apos interrupcao. O lock compartilhado evita concorrencia com captura/publicacao; ocupado retorna SINCRONIZACAO_EM_ANDAMENTO sem novas chamadas.
 
 Se o piloto funcionar, continuar o mesmo escopo com ate 100 chamadas por execucao e conferir novamente:
 
@@ -115,7 +115,7 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs apply 2025-09,2025-10 --all-events --accept-current-service-address
 ~~~
 
-Conferir a previa antes da aplicacao. Parar o worker somente na captura/aplicacao e religa-lo ao terminar, inclusive em erro. Enderecos sao atuais do servico exato, nao prova historica imutavel. O mesmo teto persistido de 500 inclui TODAS as categorias e as chamadas de vendas ja consumidas; --all-events nao cria outro orcamento. Pode nao caber todo o lote; nesse caso preservar checkpoints e reportar a pendencia, sem zerar contadores nem trocar escopo para contornar o teto. Os meses com vendas ja aplicadas ainda podem ter renovacoes/cancelamentos a recuperar.
+Conferir a previa antes da aplicacao. Parar o worker somente na captura/aplicacao e religa-lo ao terminar, inclusive em erro. Enderecos sao atuais do servico exato, nao prova historica imutavel. O mesmo teto persistido de 1500 inclui TODAS as categorias e as chamadas de vendas ja consumidas; --all-events nao cria outro orcamento. Pode nao caber todo o lote; nesse caso preservar checkpoints e reportar a pendencia, sem zerar contadores nem trocar escopo para contornar o teto. Os meses com vendas ja aplicadas ainda podem ter renovacoes/cancelamentos a recuperar.
 
 Deploy: construir imagem API e recriar API/automatic, sem migracao nem rebuild do web. Nenhuma nova captura e iniciada automaticamente por esse deploy.
 
@@ -123,3 +123,26 @@ Deploy: construir imagem API e recriar API/automatic, sem migracao nem rebuild d
 ## Fuso da validacao automatica (17/11/2026)
 
 O workflow e o teste de reparo usam explicitamente TZ=America/Sao_Paulo, igual ao Dockerfile e compose da API/worker. As datas de atendimento sem horario sao datas do calendario comercial. Em um runner UTC, gerar o indicador com meia-noite local e depois conferir o dia em Sao Paulo deslocava o dia e produzia LOCALIDADE_DATA_DIVERGENTE nos cinco testes novos; a falha foi reproduzida com TZ=UTC. A regra de validacao nao foi relaxada: um teste separado continua recusando um dia efetivamente diferente antes de qualquer chamada. Essa correcao nao exige alterar a VPS, banco ou dados.
+
+
+## Cobertura de 2025/2026 e teto ampliado (17/11/2026)
+
+O usuario solicitou completar a geografia dos tres tipos de evento em todos os meses importados dos dois anos, em ordem desde janeiro/2025. Setembro/outubro de 2025 era somente o lote em andamento quando --all-events foi adicionado; nao existe dependencia tecnica de comecar por esses meses.
+
+O teto do reparo passa de 500 para 1500 chamadas por lote explicito de ate dois meses. A chave location_service_budget:v1 permanece igual: used=463 continua em 463 apos o deploy, com 1037 chamadas disponiveis, e um contador em 500 pode retomar sem reset. O campo maximum antigo e atualizado na proxima reserva. Preservar 4..100 chamadas por execucao, 1 req/s, limites de meses, locks e verificacoes de identidade. Nao garante que todo lote caiba no novo teto; se esgotado, preservar progresso e reportar. Sem novas chamadas automaticas por deploy, migracao ou rebuild do web.
+
+Primeiro consultar o inventario local dos 24 meses. Nao usa Hubsoft, nao modifica dados, nem reclassifica a base:
+
+~~~bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs inventory 2025,2026
+~~~
+
+A tabela mostra sales/renewals/cancellations (totais publicados) e missingSales/missingRenewals/missingCancellations (sem localidade reconhecida). Meses sem registros ficam zerados: isso nao comprova que a importacao daquele mes esteja completa; meses futuros ou sem carga tambem ficam zerados. O inventario nao atesta precisao de coordenadas ou bairro quando ha somente nome generico de municipio.
+
+Depois do deploy, iniciar a previa por janeiro/fevereiro de 2025 e seguir em pares cronologicos ate o ultimo mes importado de 2026. Reaproveitar as vendas ja publicadas e as evidencias existentes; cada captura/aplicacao continua exigindo escopo explicito e conferencia de plan:
+
+~~~bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2025-01,2025-02 --all-events
+~~~
+
+Deploy: construir a imagem API e recriar API/automatic na mesma versao. O teto novo passa a valer nas proximas capturas manuais; a consulta inventory e as previas podem ser executadas com o worker ativo.
