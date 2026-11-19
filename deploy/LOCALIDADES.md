@@ -146,3 +146,24 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 ~~~
 
 Deploy: construir a imagem API e recriar API/automatic na mesma versao. O teto novo passa a valer nas proximas capturas manuais; a consulta inventory e as previas podem ser executadas com o worker ativo.
+
+
+## Cliente historico diferente do detalhe atual (19/11/2026)
+
+O diagnostico do atendimento 213646 mostrou cliente 9282 na pagina original, cache de protocolo, staging e base publicada, todos com abertura em 17/11/2025. A consulta atual ao detalhe retornou cliente 8211, sem codigo alternativo. Isso comprova a divergencia entre capturas, sem determinar seu motivo. Nao substituir o cliente historico nem usar o endereco do outro cadastro; a captura interrompida preserva as evidencias ja concluidas.
+
+A opcao --defer-client-conflicts registra LOCALIDADE_CLIENTE_DIVERGENTE como pendencia individual e permite seguir os demais eventos. Exige mesmo ID/protocolo/dia, sem exclusao e com as validacoes restantes de OS/servico. O checkpoint contem somente IDs internos, expectedCustomer/observedCustomer, fingerprint e observedAt. Nao cria identidade nem evidencia de endereco e nao atualiza fonte ou indicador do caso bloqueado. Sem a opcao, a captura continua interrompendo mesmo se o checkpoint ja existir. Um cadastro retornando cliente diferente do solicitado continua erro fatal, inclusive com a opcao.
+
+capture e plan exibem deferredClientConflicts e a contagem continua em unresolvedEvents/unresolvedByReason. uncaptured=0 nao significa lote completo: o conflito permanece em missingEvents e fora da publicacao. apply publica somente evidencias validas dos demais eventos, preservando cliente, quantidades e atributos comerciais do bloqueado. Retomadas com a opcao nao repetem a consulta do conflito; mudanca de fonte/checkpoint bloqueia a retomada.
+
+Depois do merge e deploy da imagem API/automatic, conferir plan e fazer primeiro uma unica captura de ate quatro chamadas, com o coletor parado brevemente e religado ao terminar, inclusive em erro:
+
+~~~bash
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2025-11,2025-12 --all-events
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs capture 2025-11,2025-12 4 --all-events --defer-client-conflicts
+dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locations.mjs plan 2025-11,2025-12 --all-events
+~~~
+
+Conferir a previa antes de outras rodadas/aplicacao. Preservar os caches e chamadas anteriores, 1500 por lote, 4..100 por execucao e 1 req/s. O deploy e os scripts antigos nao ativam a opcao. Nao exige migracao nem rebuild do web. O atendimento em conflito continua para revisao do vinculo na origem; esta opcao nao determina qual deveria ser o cliente atual.
+
+Apos investigar/corrigir a origem, uma reconsulta explicita dos pendentes usa --retry-unresolved junto de --defer-client-conflicts, no mesmo escopo e orcamento. Enquanto houver divergencia, manter a pendencia. Se o cliente original e as demais identidades voltarem a coincidir, capturar o endereco do servico exato e remover somente a pendencia resolvida. Nao executar esse modo em loop nem apagar checkpoints para forcar o resultado.

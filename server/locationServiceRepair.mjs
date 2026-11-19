@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {canonicalLocation} from '../server-dist/commercial.js';
 import {exactId,localDay} from './historyPolicy.mjs';
-import {clientCode,normalizedAttendanceDetail} from './historyNormalization.mjs';
+import {clientCode,normalizeDate,normalizedAttendanceDetail} from './historyNormalization.mjs';
 import {orderDate} from './historyFollowup.mjs';
 import {extractLocationFields,serviceIdentity} from './locationFields.mjs';
 import {locationRepairMonths} from './locationRecovery.mjs';
@@ -9,6 +9,7 @@ import {locationRepairMonths} from './locationRecovery.mjs';
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const MAX_CALLS=1500;
 const LOOKUP_VERSION='all_customer_statuses_v1';
+const CLIENT_CONFLICT='LOCALIDADE_CLIENTE_DIVERGENTE';
 const targetKey=target=>target.kind==='sales'?target.id:`${target.kind}:${target.id}`;
 const pendingKey=target=>`location_service_pending:${target.month}:${targetKey(target)}`;
 const key=target=>`location_service_evidence:${target.month}:${targetKey(target)}`;
@@ -73,8 +74,15 @@ function checkedEvidence(target,evidence) {
   return evidence;
 }
 function checkedPending(target,pending) {
-  if(!pending||pending.lookupVersion!==LOOKUP_VERSION||!['LOCALIDADE_SERVICO_NAO_ENCONTRADO','LOCALIDADE_SERVICO_NAO_IDENTIFICADO'].includes(pending.code)||
-    pending.fingerprint!==signature(target)||!pending.observedAt||
+  if(!pending||pending.lookupVersion!==LOOKUP_VERSION||pending.fingerprint!==signature(target)||!pending.observedAt)fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
+  if(pending.code===CLIENT_CONFLICT){
+    const a=target.attendance;
+    if(pending.expectedCustomer!==exactId(a.codigo_cliente)||exactId(pending.observedCustomer)===pending.expectedCustomer||
+      pending.attendanceId!==exactId(a.id_atendimento)||pending.protocol!==exactId(a.protocolo)||
+      pending.openedDay!==localDay(a.data_cadastro)||serviceIdentity(pending))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
+    return pending;
+  }
+  if(!['LOCALIDADE_SERVICO_NAO_ENCONTRADO','LOCALIDADE_SERVICO_NAO_IDENTIFICADO'].includes(pending.code)||
     !(pending.code==='LOCALIDADE_SERVICO_NAO_IDENTIFICADO'&&target.kind!=='sales'&&!serviceIdentity(pending)||serviceIdentity(pending)))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
   const id=serviceIdentity(target.order)||serviceIdentity(target.attendance);
   if(id&&id!==pending.id_cliente_servico)fail('HUBSOFT_SERVICO_DIVERGENTE');
@@ -141,12 +149,16 @@ export async function planServiceLocations(db,scope,{allEvents=false}={}) {
   return {months,scope:allEvents?'all_events':'sales',missingEvents:list.length,missingSales:byKind.sales.missing,
     missingRenewals:byKind.renewals.missing,missingCancellations:byKind.cancellations.missing,byKind,readyForReview:ready,readyByLocation:[...byLocation].map(([location,count])=>allEvents?{location,events:count}:{location,sales:count}),invalidEvidenceOrSource:invalid,
     unresolvedEvents:unresolved,unresolvedSales:byKind.sales.unresolved,unresolvedByReason:[...byReason].map(([code,count])=>allEvents?{code,events:count}:{code,sales:count}),
-    uncaptured:list.length-ready-invalid-unresolved,maximumCalls:MAX_CALLS,callsReserved:used,
+    uncaptured:list.length-ready-invalid-unresolved,deferredClientConflicts:byReason.get(CLIENT_CONFLICT)??0,maximumCalls:MAX_CALLS,callsReserved:used,
     addressBasis:'current_installation_address_of_exact_service',published:false};
 }
 function checkedDetail(target,detail) {
-  const a=target.attendance,o=target.order;
+  const a=target.attendance;
   normalizedAttendanceDetail(a,detail,exactId(a.codigo_cliente),localDay(a.data_cadastro));
+  return checkedService(target,detail);
+}
+function checkedService(target,detail) {
+  const a=target.attendance,o=target.order;
   if(target.kind!=='sales'){
     const ids=[serviceIdentity(detail),serviceIdentity(a)].filter(Boolean);
     if(new Set(ids).size>1)fail('HUBSOFT_SERVICO_DIVERGENTE');
@@ -171,17 +183,32 @@ function checkedDetail(target,detail) {
   if(new Set(ids).size!==1)fail('HUBSOFT_SERVICO_DIVERGENTE');
   return ids[0];
 }
+function checkedClientConflict(target,detail) {
+  const a=target.attendance;
+  if(!detail||exactId(detail.id_atendimento)!==exactId(a.id_atendimento))fail('HUBSOFT_ATENDIMENTO_ID_DIVERGENTE');
+  if(String(detail.protocolo)!==exactId(a.protocolo))fail('HUBSOFT_PROTOCOLO_DIVERGENTE');
+  const expectedCustomer=exactId(a.codigo_cliente),observedCustomer=exactId(clientCode(detail));
+  if(expectedCustomer===observedCustomer)fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
+  const openedDay=localDay(a.data_cadastro);
+  if(localDay(normalizeDate(detail.data_cadastro_br??detail.data_cadastro))!==openedDay)fail('HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE');
+  if(detail.deleted_at)fail('EXCLUSAO_EXIGE_RECONCILIACAO');
+  // Check the remaining OS/service identities too. This is a blocked case, never address evidence.
+  checkedService(target,detail);
+  return {lookupVersion:LOOKUP_VERSION,code:CLIENT_CONFLICT,fingerprint:signature(target),
+    attendanceId:exactId(a.id_atendimento),protocol:exactId(a.protocolo),openedDay,
+    expectedCustomer,observedCustomer,observedAt:new Date().toISOString()};
+}
 function sameExecution(stored,observed) {
   const expected=orderDate(stored),actual=orderDate(observed);
   return expected.length===16?actual.slice(0,16)===expected:actual===expected;
 }
-export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retryUnresolved=false,allEvents=false,env=process.env}={}) {
+export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retryUnresolved=false,allEvents=false,deferClientConflicts=false,env=process.env}={}) {
   const months=locationRepairMonths(scope);
-  if(!Number.isInteger(maxCalls)||maxCalls<4||maxCalls>100||typeof retryUnresolved!=='boolean'||typeof allEvents!=='boolean')fail('LOCALIDADE_ORCAMENTO_INVALIDO');
+  if(!Number.isInteger(maxCalls)||maxCalls<4||maxCalls>100||typeof retryUnresolved!=='boolean'||typeof allEvents!=='boolean'||typeof deferClientConflicts!=='boolean')fail('LOCALIDADE_ORCAMENTO_INVALIDO');
   if(env.HUBSOFT_HISTORY_IP_COORDINATED!=='true'||!(env.HUBSOFT_AUTOMATIC_ENABLED==='true'||env.HUBSOFT_HISTORY_ENABLED==='true')||
     client.gate?.interval!==1000)fail('LOCALIDADE_EXIGE_GATE_COORDENADO_1_REQ_S');
   return withLock(pool,async db=>{
-    const originalGate=client.gate;let calls=0,captured=0,reused=0,unresolved=0;
+    const originalGate=client.gate;let calls=0,captured=0,reused=0,unresolved=0,deferredClientConflicts=0;
     const savedBudget=(await db.query('SELECT value FROM application_settings WHERE key=$1',[budgetKey(months)])).rows[0]?.value;
     let used=Number(savedBudget?.used??0);
     if(!Number.isInteger(used)||used<0||used>MAX_CALLS)fail('LOCALIDADE_ORCAMENTO_INVALIDO');
@@ -202,7 +229,12 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
         const pending=saved.get(pendingKey(target));
         if(pending){
           checkedPending(target,pending);
-          if(!retryUnresolved){unresolved++;unresolvedKinds[target.kind]++;continue;}
+          if(pending.code===CLIENT_CONFLICT&&!deferClientConflicts)fail('HUBSOFT_CLIENTE_DIVERGENTE');
+          if(!retryUnresolved){
+            unresolved++;unresolvedKinds[target.kind]++;
+            if(pending.code===CLIENT_CONFLICT)deferredClientConflicts++;
+            continue;
+          }
         }
         if(maxCalls-calls<4)break;
         // One protocol plus two client-status queries and a possible OAuth call fit the four-call reservation.
@@ -211,7 +243,15 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
           if(identity.fingerprint!==signature(target)||!serviceIdentity(identity))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
         } else {
           const detail=await client.attendanceDetail(exactId(target.attendance.protocolo));
-          const id=checkedDetail(target,detail);
+          let id;
+          try {id=checkedDetail(target,detail);}
+          catch(error){
+            if(!deferClientConflicts||(error.code??error.message)!=='HUBSOFT_CLIENTE_DIVERGENTE')throw error;
+            const conflict=checkedClientConflict(target,detail);
+            await save(pendingKey(target),conflict);
+            unresolved++;unresolvedKinds[target.kind]++;deferredClientConflicts++;
+            continue;
+          }
           if(!id){
             await save(pendingKey(target),{lookupVersion:LOOKUP_VERSION,code:'LOCALIDADE_SERVICO_NAO_IDENTIFICADO',fingerprint:signature(target),observedAt:new Date().toISOString()});
             unresolved++;unresolvedKinds[target.kind]++;continue;
@@ -244,7 +284,7 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
         if(pending)await db.query('DELETE FROM application_settings WHERE key=$1',[pendingKey(target)]);
         captured++;
       }
-      return {months,scope:allEvents?'all_events':'sales',captured,reused,unresolvedEvents:unresolved,unresolvedSales:unresolvedKinds.sales,unresolvedByKind:unresolvedKinds,callsThisRun:calls,callsReserved:used,maximumCalls:MAX_CALLS,published:false};
+      return {months,scope:allEvents?'all_events':'sales',captured,reused,unresolvedEvents:unresolved,unresolvedSales:unresolvedKinds.sales,unresolvedByKind:unresolvedKinds,deferredClientConflicts,callsThisRun:calls,callsReserved:used,maximumCalls:MAX_CALLS,published:false};
     }finally{client.gate=originalGate;}
   });
 }

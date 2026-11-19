@@ -488,3 +488,121 @@ test('inventario cobre todos os meses de 2025/2026 e separa totais e localidades
     assert.deepEqual(await rows(query),before);assert.deepEqual((await query('SELECT * FROM application_settings')).rows,settings);
   }finally{await pg.close();}
 });
+
+
+test('opt-in separa conflito de cliente sem consultar outro cadastro e aplica somente os eventos comprovados',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const fixture=await attendanceEvents(db);
+    const changed={...fixture.details[fixture.cancellation.protocolo],cliente:{codigo_cliente:'98'},senha:'NAO_PERSISTIR'};
+    delete changed.codigo_cliente;
+    const response={...fixture,details:{...fixture.details,[fixture.cancellation.protocolo]:changed}};
+    const {api,calls,gate}=client(response),before=await rows(query);
+    const sources=(await query('SELECT * FROM source_records ORDER BY kind,id')).rows;
+    await captureServiceLocations(db,api,'2026-10',{env});
+    const evidenceBefore=(await query("SELECT key,value FROM application_settings WHERE key LIKE 'location_service_evidence:%'")).rows;
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:20,allEvents:true}),/HUBSOFT_CLIENTE_DIVERGENTE/);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].n,0);
+    const capture=await captureServiceLocations(db,api,'2026-10',{env,maxCalls:20,allEvents:true,deferClientConflicts:true});
+    assert.equal(capture.captured,1);assert.equal(capture.reused,1);assert.equal(capture.unresolvedEvents,1);
+    assert.equal(capture.deferredClientConflicts,1);assert.equal(capture.callsReserved,7);assert.equal(api.gate,gate);
+    assert.equal(calls.some(call=>call.url.pathname.endsWith('/cliente')&&call.url.searchParams.get('termo_busca')==='98'),false);
+    assert.deepEqual(await rows(query),before);assert.deepEqual((await query('SELECT * FROM source_records ORDER BY kind,id')).rows,sources);
+    const saved=(await query("SELECT value FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].value;
+    assert.equal(saved.code,'LOCALIDADE_CLIENTE_DIVERGENTE');assert.equal(saved.expectedCustomer,'12');assert.equal(saved.observedCustomer,'98');
+    assert.equal(saved.attendanceId,fixture.cancellation.id_atendimento);assert.equal(saved.id_cliente_servico,undefined);assert.equal(saved.bairro,undefined);
+    assert.equal(JSON.stringify((await query('SELECT value FROM application_settings')).rows).includes('NAO_PERSISTIR'),false);
+    const plan=await planServiceLocations(db,'2026-10',{allEvents:true});
+    assert.equal(plan.missingEvents,3);assert.equal(plan.readyForReview,2);assert.equal(plan.uncaptured,0);
+    assert.equal(plan.unresolvedEvents,1);assert.equal(plan.byKind.cancellations.unresolved,1);assert.equal(plan.deferredClientConflicts,1);
+    assert.deepEqual(plan.unresolvedByReason,[{code:'LOCALIDADE_CLIENTE_DIVERGENTE',events:1}]);
+    const count=calls.length;
+    assert.equal((await captureServiceLocations(db,api,'2026-10',{env,maxCalls:20,allEvents:true,deferClientConflicts:true})).callsThisRun,0);
+    assert.equal(calls.length,count);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,maxCalls:20,allEvents:true}),/HUBSOFT_CLIENTE_DIVERGENTE/);
+    assert.equal(calls.length,count);
+    assert.deepEqual((await query('SELECT key,value FROM application_settings WHERE key=$1',[evidenceBefore[0].key])).rows,evidenceBefore);
+    const applied=await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true,allEvents:true});
+    assert.equal(applied.updatedEvents,2);assert.equal(applied.updatedCancellations,0);assert.equal(applied.pendingCancellations,1);
+    assert.deepEqual(nonGeo(await rows(query)),nonGeo(before));
+    assert.deepEqual((await query("SELECT * FROM source_records WHERE kind='attendance' AND id=$1",['hubsoft:'+fixture.cancellation.id_atendimento])).rows,[sources.find(row=>row.id==='hubsoft:'+fixture.cancellation.id_atendimento)]);
+    assert.deepEqual((await rows(query)).find(row=>row.kind==='cancellations'),before.find(row=>row.kind==='cancellations'));
+  }finally{await pg.close();}
+});
+
+test('conflito de cliente em venda preserva historico e reconsulta explicita so resolve com cliente original',async()=>{
+  const {db,query,pg}=await database();
+  const response={detail:{...detail(),cliente:{codigo_cliente:'98'}}};
+  delete response.detail.codigo_cliente;
+  const {api,calls}=client(response);
+  try {
+    const before=await rows(query);
+    const capture=await captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true});
+    assert.equal(capture.captured,0);assert.equal(capture.unresolvedSales,1);assert.equal(capture.deferredClientConflicts,1);
+    assert.equal(capture.callsReserved,2);assert.equal(calls.filter(call=>call.url.pathname.endsWith('/cliente')).length,0);
+    assert.deepEqual(await rows(query),before);
+    const count=calls.length;
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env}),/HUBSOFT_CLIENTE_DIVERGENTE/);assert.equal(calls.length,count);
+    const retry=await captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true,retryUnresolved:true});
+    assert.equal(retry.unresolvedEvents,1);assert.equal(retry.callsThisRun,1);
+    response.detail=detail();
+    const resolved=await captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true,retryUnresolved:true});
+    assert.equal(resolved.captured,1);assert.equal(resolved.unresolvedEvents,0);assert.equal(resolved.callsThisRun,2);
+    assert.equal(resolved.callsReserved,5);assert.equal(resolved.deferredClientConflicts,0);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].n,0);
+    assert.equal((await planServiceLocations(db,'2026-10')).readyForReview,1);
+    assert.equal((await applyServiceLocations(db,'2026-10',{acceptCurrentServiceAddress:true})).updatedSales,1);
+  }finally{await pg.close();}
+});
+
+test('opt-in de cliente nao esconde divergencia de ID, protocolo, dia, exclusao, servico ou OS',async()=>{
+  const {db,query,pg}=await database();
+  try {
+    const before=await rows(query);
+    const cases=[
+      [{id_atendimento:'999'},/HUBSOFT_ATENDIMENTO_ID_DIVERGENTE/],
+      [{protocolo:'999'},/HUBSOFT_PROTOCOLO_DIVERGENTE/],
+      [{data_cadastro:'05/10/2026'},/HUBSOFT_ATENDIMENTO_DIA_DIVERGENTE/],
+      [{deleted_at:'2026-10-03'},/EXCLUSAO_EXIGE_RECONCILIACAO/],
+      [{servico:{id_cliente_servico:'77'}},/HUBSOFT_SERVICO_DIVERGENTE/],
+      [{ordens_servico:[{...order,id_ordem_servico:'202'}]},/LOCALIDADE_OS_NAO_CONFIRMADA/]
+    ];
+    for(const [change,code] of cases){
+      await query("DELETE FROM application_settings WHERE key LIKE 'location_service_%'");
+      const {api,gate}=client({detail:{...detail(),cliente:{codigo_cliente:'98'},...change}});
+      await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true}),code);
+      assert.equal(api.gate,gate);assert.deepEqual(await rows(query),before);
+      assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].n,0);
+    }
+  }finally{await pg.close();}
+});
+
+test('resposta de cadastro com cliente errado continua interrompendo mesmo com opt-in',async()=>{
+  const {db,query,pg}=await database();const {api,calls}=client({clientCode:'98'});
+  try {
+    const before=await rows(query);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true}),/HUBSOFT_CLIENTE_DIVERGENTE/);
+    assert.deepEqual(await rows(query),before);assert.equal(calls.length,3);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0].n,0);
+    assert.equal((await query("SELECT count(*)::int AS n FROM application_settings WHERE key LIKE 'location_service_evidence:%'")).rows[0].n,0);
+  }finally{await pg.close();}
+});
+
+test('pendencia de cliente adulterada ou fonte alterada nao pode ser ignorada pelo opt-in',async()=>{
+  const {db,query,pg}=await database();const {api,calls}=client({detail:{...detail(),cliente:{codigo_cliente:'98'}}});
+  try {
+    await captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true});
+    const saved=(await query("SELECT key,value FROM application_settings WHERE key LIKE 'location_service_pending:%'")).rows[0];
+    const count=calls.length;
+    for(const change of [{expectedCustomer:'99'},{observedCustomer:'12'},{attendanceId:'999'},{protocol:'999'},{openedDay:'2026-10-05'},{id_cliente_servico:'99'}]){
+      await query('UPDATE application_settings SET value=$1::jsonb WHERE key=$2',[JSON.stringify({...saved.value,...change}),saved.key]);
+      assert.equal((await planServiceLocations(db,'2026-10')).invalidEvidenceOrSource,1);
+      await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true}),/LOCALIDADE_EVIDENCIA_DIVERGENTE/);
+      assert.equal(calls.length,count);
+    }
+    await query('UPDATE application_settings SET value=$1::jsonb WHERE key=$2',[JSON.stringify(saved.value),saved.key]);
+    await query("UPDATE source_records SET payload=payload||$1::jsonb WHERE kind='attendance'",[JSON.stringify({descricao_abertura:'Fonte alterada depois da captura'})]);
+    await assert.rejects(captureServiceLocations(db,api,'2026-10',{env,deferClientConflicts:true}),/LOCALIDADE_EVIDENCIA_DIVERGENTE/);
+    assert.equal(calls.length,count);
+  }finally{await pg.close();}
+});
