@@ -167,3 +167,47 @@ dc run --rm --no-deps --entrypoint node history server/jobs/repair-service-locat
 Conferir a previa antes de outras rodadas/aplicacao. Preservar os caches e chamadas anteriores, 1500 por lote, 4..100 por execucao e 1 req/s. O deploy e os scripts antigos nao ativam a opcao. Nao exige migracao nem rebuild do web. O atendimento em conflito continua para revisao do vinculo na origem; esta opcao nao determina qual deveria ser o cliente atual.
 
 Apos investigar/corrigir a origem, uma reconsulta explicita dos pendentes usa --retry-unresolved junto de --defer-client-conflicts, no mesmo escopo e orcamento. Enquanto houver divergencia, manter a pendencia. Se o cliente original e as demais identidades voltarem a coincidir, capturar o endereco do servico exato e remover somente a pendencia resolvida. Nao executar esse modo em loop nem apagar checkpoints para forcar o resultado.
+
+
+## Reconciliacao pontual do cliente do atendimento 215431 (24/11/2026)
+
+O mesmo atendimento/protocolo e OS foram capturados com codigo_cliente 8211. A interface e as consultas atuais por protocolo e pela listagem diaria concordaram com 14926, servico 22709. Isso comprova a divergencia entre capturas, sem determinar sua causa. O usuario autorizou preparar uma reconciliacao explicita desse caso. Outros conflitos, incluindo o atendimento 213646, continuam sujeitos as regras anteriores.
+
+O novo comando e restrito a atendimento 215431 / protocolo 20251209161519693515 / OS 47911 / numero 037225343161519088 / servico 22709. Nao aceita outros IDs ou meses. Reutiliza a chave location_service_budget:v1:2025-11,2025-12 (1500 acumuladas), lock do coletor e gate compartilhado de 1 req/s. Nao resetar o contador. capture permite ate quatro chamadas, incluindo OAuth/falhas, revalida detalhe e somente a pagina 1 da listagem de 09/12/2025. Se o registro tiver mudado de pagina, reporta ausencia e interrompe; nao varre outras paginas nem escolhe outro cliente. Nao consulta cadastro/endereco de cliente e nao altera a Hubsoft.
+
+plan e apply usam somente o banco local. A simulacao compara a classificacao comercial completa antes/depois da troca do codigo e bloqueia qualquer diferenca nos eventos de venda, renovacao, cancelamento ou reativacao. Registros comerciais publicados nao sao regravados. Nomes, descricoes, motivos, planos, vendedores e datas originais sao preservados. A aplicacao altera apenas codigo_cliente das duas fontes e metadados client_reconciliation. Paginas, history_records, caches historicos e provas anteriores sao preservados. Checkpoints de localidade afetados sao arquivados com seus valores e hashes, removidos apenas do namespace ativo para nova validacao; checkpoints de outros registros e orcamentos permanecem intactos. Uma sincronizacao futura mantem o marcador quando o cliente coincide e falha se tentar restaurar o cliente antigo ou outro servico.
+
+Deploy: construir a imagem API e recriar API/automatic na mesma versao. Sem migracao, rebuild do web ou ativacao automatica. Depois do deploy, com a funcao dc ja definida na pasta do Sales:
+
+```bash
+dc run --rm --no-deps --entrypoint node history server/jobs/reconcile-location-client.mjs plan
+```
+
+Parar automatic brevemente na captura e religa-lo mesmo em erro:
+
+```bash
+(
+  set -e
+  trap 'dc --profile automation up -d --no-deps --no-build automatic' EXIT
+  dc --profile automation stop automatic
+  dc run --rm --no-deps -T --entrypoint node history server/jobs/reconcile-location-client.mjs capture
+)
+dc run --rm --no-deps --entrypoint node history server/jobs/reconcile-location-client.mjs plan
+```
+
+Conferir state=ready_for_review, cliente 8211 -> 14926, servico 22709, commercialChanges=0 e os totais. Copiar previewHash real retornado. A prova expira em 24 horas; fonte, eventos relacionados ou checkpoints alterados invalidam a previa. Nova capture e explicita e usa o mesmo orcamento. Nao inventar hash nem usar o da documentacao.
+
+Somente apos revisar a previa, aplicar passando o hash real:
+
+```bash
+(
+  set -e
+  trap 'dc --profile automation up -d --no-deps --no-build automatic' EXIT
+  dc --profile automation stop automatic
+  dc run --rm --no-deps -T --entrypoint node history \
+    server/jobs/reconcile-location-client.mjs apply \
+    --accept-client-change --expect-preview HASH_REAL_DA_PREVIA
+)
+```
+
+A aplicacao e transacional e idempotente; published=true significa reconciliacao das fontes, geographyPublished=false significa que a localidade ainda depende do reparo normal. Depois, conferir plan 2025-11,2025-12 --all-events. Para conferir o caso reconciliado, executar primeiro um piloto capture 2025-11,2025-12 4 somente de vendas (sem --all-events), no mesmo orcamento original, com o worker parado brevemente e religado ao terminar. Investigar a renovacao invalida antes de retomar a captura completa com --all-events --defer-client-conflicts, pois ela continua bloqueando a validacao. Nao aplicar o lote enquanto existir evidencia invalida sem investigacao. Este ajuste nao resolve automaticamente o outro conflito de cliente, a renovacao invalida ou as demais vendas ainda sem captura.
