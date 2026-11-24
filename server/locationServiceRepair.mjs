@@ -326,3 +326,6 @@ export async function applyServiceLocations(pool,scope,{acceptCurrentServiceAddr
     }catch(error){await db.query('ROLLBACK');throw error;}
   });
 }
+
+// Shared strict validators and collector lock for the separately authorized customer reconciliation.
+export {validateTarget as validateLocationTarget,checkedDetail as checkedLocationDetail,withLock as withLocationRepairLock};
