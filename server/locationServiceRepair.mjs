@@ -11,6 +11,7 @@ const MAX_CALLS=1500;
 const LOOKUP_VERSION='all_customer_statuses_v1';
 const CLIENT_CONFLICT='LOCALIDADE_CLIENTE_DIVERGENTE';
 const targetKey=target=>target.kind==='sales'?target.id:`${target.kind}:${target.id}`;
+const refreshConstraintKey=target=>`location_service_refresh_constraint:${target.month}:${targetKey(target)}`;
 const pendingKey=target=>`location_service_pending:${target.month}:${targetKey(target)}`;
 const key=target=>`location_service_evidence:${target.month}:${targetKey(target)}`;
 const identityKey=target=>`location_service_identity:${target.month}:${targetKey(target)}`;
@@ -66,10 +67,20 @@ function validateTarget(target) {
     o.data_referencia_bi!=='data_termino_executado'||!/\binstalacao\b/.test(type)||/check[\s-]*list/.test(type)||
     String(o.status).trim().toLowerCase()!=='finalizado')fail('LOCALIDADE_EXECUCAO_DIVERGENTE');
 }
-function checkedEvidence(target,evidence) {
+function checkedRefreshConstraint(target,saved) {
+  const constraint=saved.get(refreshConstraintKey(target));
+  if(!constraint)return '';
+  if(constraint.version!==1||constraint.fingerprint!==signature(target)||constraint.kind!==target.kind||constraint.eventId!==target.id||
+    constraint.attendanceId!==exactId(target.attendance.id_atendimento)||constraint.protocol!==exactId(target.attendance.protocolo)||
+    constraint.customer!==exactId(target.attendance.codigo_cliente)||!/^location_service_evidence_archive:v1:[a-f0-9]{64}$/.test(constraint.auditKey??'')||!serviceIdentity(constraint))
+    fail('LOCALIDADE_RECAPTURA_EXIGE_REVISAO');
+  return serviceIdentity(constraint);
+}
+function checkedEvidence(target,evidence,expectedService='') {
   if(!evidence||evidence.fingerprint!==signature(target)||!evidence.observedAt||
     !canonicalLocation(evidence.bairro,evidence.cidade)||!serviceIdentity(evidence))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
   const current=serviceIdentity(target.order)||serviceIdentity(target.attendance);
+  if(expectedService&&expectedService!==evidence.id_cliente_servico)fail('HUBSOFT_SERVICO_DIVERGENTE');
   if(current&&current!==evidence.id_cliente_servico)fail('HUBSOFT_SERVICO_DIVERGENTE');
   return evidence;
 }
@@ -90,7 +101,7 @@ function checkedPending(target,pending) {
 }
 async function cache(db,list) {
   if(!list.length)return new Map();
-  return new Map((await db.query('SELECT key,value FROM application_settings WHERE key=ANY($1::text[])',[list.flatMap(target=>[key(target),identityKey(target),activeMissKey(target),pendingKey(target)])])).rows.map(row=>[row.key,row.value]));
+  return new Map((await db.query('SELECT key,value FROM application_settings WHERE key=ANY($1::text[])',[list.flatMap(target=>[key(target),identityKey(target),activeMissKey(target),pendingKey(target),refreshConstraintKey(target)])])).rows.map(row=>[row.key,row.value]));
 }
 async function withLock(pool,work) {
   const db=await pool.connect();let locked=false;
@@ -134,9 +145,9 @@ export async function planServiceLocations(db,scope,{allEvents=false}={}) {
   for(const target of list)byKind[target.kind].missing++;
   let ready=0,invalid=0,unresolved=0;const byLocation=new Map(),byReason=new Map();
   for(const target of list)try{
-    validateTarget(target);
+    validateTarget(target);checkedRefreshConstraint(target,saved);
     if(saved.has(key(target))){
-      const evidence=checkedEvidence(target,saved.get(key(target))),location=canonicalLocation(evidence.bairro,evidence.cidade);
+      const evidence=checkedEvidence(target,saved.get(key(target)),checkedRefreshConstraint(target,saved)),location=canonicalLocation(evidence.bairro,evidence.cidade);
       ready++;byKind[target.kind].ready++;byLocation.set(location,(byLocation.get(location)??0)+1);
       const locations=locationsByKind[target.kind];locations.set(location,(locations.get(location)??0)+1);
     }else if(saved.has(pendingKey(target))){
@@ -225,7 +236,8 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
       const unresolvedKinds={sales:0,renewals:0,cancellations:0};
       for(const target of list) {
         validateTarget(target);
-        if(saved.has(key(target))){checkedEvidence(target,saved.get(key(target)));reused++;continue;}
+        const expectedService=checkedRefreshConstraint(target,saved);
+        if(saved.has(key(target))){checkedEvidence(target,saved.get(key(target)),checkedRefreshConstraint(target,saved));reused++;continue;}
         const pending=saved.get(pendingKey(target));
         if(pending){
           checkedPending(target,pending);
@@ -240,6 +252,7 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
         // One protocol plus two client-status queries and a possible OAuth call fit the four-call reservation.
         let identity=saved.get(identityKey(target));
         if(identity) {
+          if(expectedService&&serviceIdentity(identity)!==expectedService)fail('HUBSOFT_SERVICO_DIVERGENTE');
           if(identity.fingerprint!==signature(target)||!serviceIdentity(identity))fail('LOCALIDADE_EVIDENCIA_DIVERGENTE');
         } else {
           const detail=await client.attendanceDetail(exactId(target.attendance.protocolo));
@@ -248,10 +261,12 @@ export async function captureServiceLocations(pool,client,scope,{maxCalls=4,retr
           catch(error){
             if(!deferClientConflicts||(error.code??error.message)!=='HUBSOFT_CLIENTE_DIVERGENTE')throw error;
             const conflict=checkedClientConflict(target,detail);
+            if(expectedService&&checkedService(target,detail)!==expectedService)fail('HUBSOFT_SERVICO_DIVERGENTE');
             await save(pendingKey(target),conflict);
             unresolved++;unresolvedKinds[target.kind]++;deferredClientConflicts++;
             continue;
           }
+          if(expectedService&&id!==expectedService)fail('HUBSOFT_SERVICO_DIVERGENTE');
           if(!id){
             await save(pendingKey(target),{lookupVersion:LOOKUP_VERSION,code:'LOCALIDADE_SERVICO_NAO_IDENTIFICADO',fingerprint:signature(target),observedAt:new Date().toISOString()});
             unresolved++;unresolvedKinds[target.kind]++;continue;
@@ -296,7 +311,7 @@ export async function applyServiceLocations(pool,scope,{acceptCurrentServiceAddr
     try {
       const list=await targets(db,months,allEvents),saved=await cache(db,list),ready=[],sourceUpdates=new Map();
       for(const target of list)if(saved.has(key(target))) {
-        validateTarget(target);const evidence=checkedEvidence(target,saved.get(key(target)));
+        validateTarget(target);const evidence=checkedEvidence(target,saved.get(key(target)),checkedRefreshConstraint(target,saved));
         ready.push({target,evidence,location:canonicalLocation(evidence.bairro,evidence.cidade)});
       }
       for(const {target,evidence,location} of ready) {
@@ -329,3 +344,81 @@ export async function applyServiceLocations(pool,scope,{acceptCurrentServiceAddr
 
 // Shared strict validators and collector lock for the separately authorized customer reconciliation.
 export {validateTarget as validateLocationTarget,checkedDetail as checkedLocationDetail,withLock as withLocationRepairLock};
+
+function refreshSelection(scope,{kind,eventId}={}) {
+  const months=locationRepairMonths(scope);
+  if(!['sales','renewals','cancellations'].includes(kind)||typeof eventId!=='string'||
+    !/^[a-zA-Z0-9:_-]{1,300}$/.test(eventId))fail('LOCALIDADE_EVENTO_INVALIDO');
+  return {months,kind,eventId};
+}
+async function staleEvidencePreview(db,selection) {
+  const {months,kind,eventId}=selection;
+  const matches=(await targets(db,months,true)).filter(t=>t.kind===kind&&t.id===eventId);
+  if(matches.length!==1)fail('LOCALIDADE_EVENTO_NAO_ENCONTRADO');
+  const target=matches[0];validateTarget(target);
+  if(target.attendance.deleted_at||target.order?.deleted_at)fail('EXCLUSAO_EXIGE_RECONCILIACAO');
+  const saved=await cache(db,[target]),evidence=saved.get(key(target));
+  if(!evidence)fail('LOCALIDADE_EVIDENCIA_AUSENTE');
+  const service=serviceIdentity(evidence),currentSignature=signature(target);
+  if(evidence.version!==1||evidence.source!=='hubsoft_exact_service_current_installation_address'||
+    !/^[a-f0-9]{64}$/.test(evidence.fingerprint??'')||!service||
+    !canonicalLocation(evidence.bairro,evidence.cidade)||!Number.isFinite(Date.parse(evidence.observedAt)))
+    fail('LOCALIDADE_EVIDENCIA_INVALIDA');
+  if(evidence.fingerprint===currentSignature)fail('LOCALIDADE_EVIDENCIA_JA_ATUAL');
+  if(saved.has(pendingKey(target)))fail('LOCALIDADE_PENDENCIA_EXIGE_REVISAO');
+  const currentServices=[serviceIdentity(target.order),serviceIdentity(target.attendance)].filter(Boolean);
+  if(currentServices.some(id=>id!==service))fail('HUBSOFT_SERVICO_DIVERGENTE');
+  const checkpoints=[...saved].sort(([a],[b])=>a.localeCompare(b)).map(([name,value])=>{
+    if(value.fingerprint!==evidence.fingerprint||serviceIdentity(value)!==service)fail('LOCALIDADE_CHECKPOINT_DIVERGENTE');
+    return {key:name,sha256:digest(value)};
+  });
+  const report={months,kind,eventId,month:target.month,attendanceId:exactId(target.attendance.id_atendimento),
+    protocol:exactId(target.attendance.protocolo),customer:exactId(target.attendance.codigo_cliente),
+    serviceId:service,previousLocation:canonicalLocation(evidence.bairro,evidence.cidade),
+    evidenceObservedAt:evidence.observedAt,previousFingerprint:evidence.fingerprint,currentFingerprint:currentSignature,
+    state:'stale_evidence',checkpointsToArchive:checkpoints.length,requiresFreshCapture:true,
+    published:false};
+  return {report:{...report,previewHash:digest({report,checkpoints})},checkpoints};
+}
+// These operations are local-only: they never approve stale evidence or initiate HTTP.
+export async function planServiceEvidenceRefresh(db,scope,options) {
+  return (await staleEvidencePreview(db,refreshSelection(scope,options))).report;
+}
+export async function archiveStaleServiceEvidence(pool,scope,{kind,eventId,acceptArchive=false,expectedPreview}={}) {
+  const selection=refreshSelection(scope,{kind,eventId});
+  if(!acceptArchive)fail('LOCALIDADE_ARQUIVAMENTO_ACEITE_OBRIGATORIO');
+  if(!/^[a-f0-9]{64}$/.test(expectedPreview??''))fail('LOCALIDADE_PREVIA_OBRIGATORIA');
+  const auditKey=`location_service_evidence_archive:v1:${expectedPreview}`;
+  return withLock(pool,async db=>{
+    await db.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+    try {
+      const existing=(await db.query('SELECT value FROM application_settings WHERE key=$1',[auditKey])).rows[0]?.value;
+      if(existing){
+        if(existing.previewHash!==expectedPreview||existing.kind!==kind||existing.eventId!==eventId||
+          JSON.stringify(existing.months)!==JSON.stringify(selection.months))fail('LOCALIDADE_AUDITORIA_DIVERGENTE');
+        await db.query('COMMIT');return {state:'already_archived',archivedCheckpoints:0,auditKey,published:false};
+      }
+      const {report,checkpoints}=await staleEvidencePreview(db,selection);
+      if(report.previewHash!==expectedPreview)fail('LOCALIDADE_PREVIA_DIVERGENTE');
+      const archived=[];
+      for(const point of checkpoints){
+        const archiveKey=`${auditKey}:checkpoint:${point.key}`;
+        const result=await db.query('UPDATE application_settings SET key=$2 WHERE key=$1 RETURNING key',[point.key,archiveKey]);
+        if(result.rows.length!==1)fail('LOCALIDADE_CHECKPOINT_ALTERADO');
+        archived.push({...point,archiveKey});
+      }
+      // This is a constraint, never a reusable identity: fresh protocol validation remains mandatory.
+      await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[
+        refreshConstraintKey({month:report.month,kind,id:eventId}),JSON.stringify({version:1,
+          fingerprint:report.currentFingerprint,id_cliente_servico:report.serviceId,kind,eventId,
+          attendanceId:report.attendanceId,protocol:report.protocol,customer:report.customer,auditKey})
+      ]);
+      await db.query('INSERT INTO application_settings(key,value) VALUES($1,$2::jsonb)',[auditKey,JSON.stringify({
+        ...report,reason:'source_fingerprint_changed',archived,archivedAt:new Date().toISOString()
+      })]);
+      await db.query('COMMIT');
+      return {months:selection.months,kind,eventId,state:'needs_fresh_capture',archivedCheckpoints:archived.length,
+        auditKey,budgetUnchanged:true,published:false};
+    }catch(error){await db.query('ROLLBACK');throw error;}
+  });
+}

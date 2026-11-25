@@ -1,9 +1,19 @@
-import {inventoryServiceLocations,planServiceLocations,captureServiceLocations,applyServiceLocations} from '../locationServiceRepair.mjs';
+import {inventoryServiceLocations,planServiceLocations,captureServiceLocations,applyServiceLocations,planServiceEvidenceRefresh,archiveStaleServiceEvidence} from '../locationServiceRepair.mjs';
 import {locationRepairMonths} from '../locationRecovery.mjs';
 const [action='help',scope,...options]=process.argv.slice(2);
 let pool;
 try {
-  if(action==='help')console.log('Uso: repair-service-locations.mjs inventory anos (ex.: 2025,2026) | plan meses [--all-events] | capture meses [4..100 chamadas] [--all-events] [--retry-unresolved] [--defer-client-conflicts] | apply meses --accept-current-service-address [--all-events]');
+  if(action==='help')console.log('Uso: repair-service-locations.mjs inventory anos (ex.: 2025,2026) | plan meses [--all-events] | capture meses [4..100 chamadas] [--all-events] [--retry-unresolved] [--defer-client-conflicts] | apply meses --accept-current-service-address [--all-events] | plan-refresh meses tipo evento | archive-stale meses tipo evento --accept-archive --expect-preview SHA256');
+  else if(['plan-refresh','archive-stale'].includes(action)) {
+    locationRepairMonths(scope);
+    const [kind,eventId,...flags]=options;
+    if(!['sales','renewals','cancellations'].includes(kind)||typeof eventId!=='string'||!/^[a-zA-Z0-9:_-]{1,300}$/.test(eventId))throw new Error('LOCALIDADE_EVENTO_INVALIDO');
+    if(action==='plan-refresh'&&flags.length||action==='archive-stale'&&(flags.length!==3||flags[0]!=='--accept-archive'||flags[1]!=='--expect-preview'||!/^[a-f0-9]{64}$/.test(flags[2]??'')))throw new Error('COMANDO_INVALIDO');
+    ({pool}=await import('../db.mjs'));
+    const result=action==='plan-refresh'?await planServiceEvidenceRefresh(pool,scope,{kind,eventId}):
+      await archiveStaleServiceEvidence(pool,scope,{kind,eventId,acceptArchive:true,expectedPreview:flags[2]});
+    console.log(JSON.stringify(result,null,2));
+  }
   else if(action==='inventory') {
     if(options.length)throw new Error('COMANDO_INVALIDO');
     ({pool}=await import('../db.mjs'));
