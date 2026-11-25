@@ -211,3 +211,38 @@ Somente apos revisar a previa, aplicar passando o hash real:
 ```
 
 A aplicacao e transacional e idempotente; published=true significa reconciliacao das fontes, geographyPublished=false significa que a localidade ainda depende do reparo normal. Depois, conferir plan 2025-11,2025-12 --all-events. Para conferir o caso reconciliado, executar primeiro um piloto capture 2025-11,2025-12 4 somente de vendas (sem --all-events), no mesmo orcamento original, com o worker parado brevemente e religado ao terminar. Investigar a renovacao invalida antes de retomar a captura completa com --all-events --defer-client-conflicts, pois ela continua bloqueando a validacao. Nao aplicar o lote enquanto existir evidencia invalida sem investigacao. Este ajuste nao resolve automaticamente o outro conflito de cliente, a renovacao invalida ou as demais vendas ainda sem captura.
+
+
+## Evidencia desatualizada por mudanca de fonte (25/11/2026)
+
+A renovacao de dezembro/2025, atendimento 215627, protocolo 20251211172356164035, cliente 4849, passou na validacao da fonte, mas a assinatura atual difere da evidencia capturada. Isso nao identifica quais campos mudaram nem permite aprovar o endereco antigo. As capturas/aplicacoes normais continuam bloqueando qualquer assinatura divergente.
+
+plan-refresh e archive-stale sao procedimentos locais separados, para um evento explicito no mesmo escopo de ate dois meses. Nao fazem HTTP nem alteram fonte, cliente, indicadores, historico ou orcamento. A previa exige evento ainda sem localidade, fonte valida, evidencia antiga integra, sem pendencia concorrente e sem conflito de servico entre fonte e cache. Fonte invalida, exclusao, evidencia ja atual ou checkpoints inconsistentes bloqueiam o procedimento.
+
+Depois do merge/deploy da imagem API/automatic (sem migracao ou rebuild do web), consultar a previa:
+
+```bash
+dc run --rm --no-deps --entrypoint node history \
+  server/jobs/repair-service-locations.mjs plan-refresh 2025-11,2025-12 \
+  renewals renewal:protocolo:20251211172356164035
+```
+
+Conferir atendimento 215627, protocolo, cliente e servico retornados, ambas as assinaturas, state=stale_evidence e requiresFreshCapture=true. O hash da previa vincula a fonte atual e todos os checkpoints desse evento. Copiar o previewHash real, sem inventar valores.
+
+Para arquivar, parar o worker brevemente, religa-lo inclusive em erro e executar com o hash revisado:
+
+```bash
+(
+  set -e
+  trap 'dc --profile automation up -d --no-deps --no-build automatic' EXIT
+  dc --profile automation stop automatic
+  dc run --rm --no-deps -T --entrypoint node history \
+    server/jobs/repair-service-locations.mjs archive-stale 2025-11,2025-12 \
+    renewals renewal:protocolo:20251211172356164035 \
+    --accept-archive --expect-preview HASH_REAL_DA_PREVIA
+)
+```
+
+O arquivamento e transacional, disputa o lock do coletor e renomeia somente os checkpoints do evento para location_service_evidence_archive:v1:<hash>:checkpoint:<chave-original>, preservando integralmente seus valores. A auditoria registra as assinaturas e hashes, sem copiar textos livres ou nomes. Uma restricao separada guarda a assinatura atual, identidades e servico original: nao e um cache de identidade reutilizavel e nao dispensa a consulta nova ao protocolo. Outra fonte, cliente ou servico continua bloqueando captura/publicacao, inclusive com --defer-client-conflicts. Outros eventos e todas as chamadas consumidas permanecem intactos. Qualquer mudanca de fonte/checkpoint entre previa e arquivamento bloqueia a operacao. Repetir com o mesmo hash retorna already_archived e nao arquiva uma evidencia nova.
+
+O resultado needs_fresh_capture nao aprova endereco. Conferir plan 2025-11,2025-12 --all-events: o caso deixa de estar invalido e passa a uncaptured. Em seguida, uma unica captura padrao de ate quatro chamadas, com --all-events --defer-client-conflicts, deve validar novamente protocolo, ID, cliente, data e servico e consultar somente o endereco de instalacao exato. Usa o mesmo contador de 1500; nao apagar ou editar seu valor. O conflito de cliente do atendimento 213646 continua pendente e nao foi reconciliado por este procedimento. Se a nova captura falhar, preservar arquivos de auditoria e fonte e investigar o erro, sem aprovar o cache antigo. Conferir a nova previa antes de aplicar as localidades validas com --accept-current-service-address.
